@@ -68,6 +68,21 @@ public:
 class GQLASTBuilder : public GQLBaseVisitor
 {
 public:
+    std::any aggregateResult(std::any aggregate, std::any next_result) override
+    {
+        if (!next_result.has_value())
+            return aggregate;
+        try
+        {
+            if (std::any_cast<ASTPtr>(next_result))
+                return next_result;
+        }
+        catch (const std::bad_any_cast &)
+        {
+        }
+        return aggregate.has_value() ? aggregate : next_result;
+    }
+
     static ASTPtr anyToAST(std::any & val)
     {
         if (!val.has_value())
@@ -80,6 +95,46 @@ public:
         {
             return nullptr;
         }
+    }
+
+    // ==================== Top-level statement combination ====================
+
+    std::any visitAmbientLinearQueryStatement(GQLParser::AmbientLinearQueryStatementContext * ctx) override
+    {
+        ASTPtr query_ast;
+
+        if (auto * slqs = ctx->simpleLinearQueryStatement())
+        {
+            for (auto * sqs : slqs->simpleQueryStatement())
+            {
+                auto stmt_any = visit(sqs);
+                auto stmt = anyToAST(stmt_any);
+                if (stmt && stmt->as<ASTGraphQuery>())
+                    query_ast = stmt;
+            }
+        }
+
+        if (auto * prs = ctx->primitiveResultStatement())
+        {
+            auto ret_any = visitPrimitiveResultStatement(prs);
+            auto ret_ast = anyToAST(ret_any);
+
+            if (query_ast && ret_ast)
+            {
+                auto * graph_query = query_ast->as<ASTGraphQuery>();
+                if (auto * ret_clause = ret_ast->as<ASTGraphReturnClause>())
+                {
+                    graph_query->return_clause = ret_clause;
+                    graph_query->children.push_back(ret_ast);
+                }
+            }
+            else if (!query_ast && ret_ast)
+            {
+                query_ast = ret_ast;
+            }
+        }
+
+        return query_ast ? query_ast : ASTPtr{};
     }
 
     // ==================== MATCH statement ====================
