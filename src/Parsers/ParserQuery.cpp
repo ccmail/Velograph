@@ -40,6 +40,7 @@
 #include <Parsers/Access/ParserMoveAccessEntityQuery.h>
 #include <Parsers/Access/ParserSetRoleQuery.h>
 #include <Parsers/Access/ParserExecuteAsQuery.h>
+#include <Parsers/graph/ParserGraphQuery.h>
 
 
 namespace DB
@@ -81,7 +82,10 @@ bool ParserQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
     ParserUpdateQuery update_p;
     ParserCopyQuery copy_p;
 
-    bool res = query_with_output_p.parse(pos, node, expected)
+    ParserGraphQuery graph_query_p;
+
+    bool res = graph_query_p.parse(pos, node, expected)
+        || query_with_output_p.parse(pos, node, expected)
         || insert_p.parse(pos, node, expected)
         || use_p.parse(pos, node, expected)
         || set_role_p.parse(pos, node, expected)
