@@ -1,0 +1,39 @@
+# Docker Compose for Graph-on-ClickHouse Development
+#
+# Usage:
+#   cd /path/to/ClickHouse
+#   docker compose -f docs/graph/docker-compose.graph.yml up -d
+#   docker compose -f docs/graph/docker-compose.graph.yml exec dev bash
+#
+# The source code is mounted at /workspace/ClickHouse inside the container.
+# Build artifacts persist in named volumes to survive container recreation.
+
+services:
+  dev:
+    build:
+      context: ../..
+      dockerfile: docs/graph/Dockerfile.dev
+    container_name: graph-dev
+    hostname: graph-dev
+    volumes:
+      - ../..:/workspace/ClickHouse
+      - build-cache:/workspace/ClickHouse/build
+      - build-debug-cache:/workspace/ClickHouse/build_debug
+    tmpfs:
+      - /tmp:size=4G
+    shm_size: "4g"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+    stdin_open: true
+    tty: true
+    working_dir: /workspace/ClickHouse
+
+volumes:
+  build-cache:
+  build-debug-cache:
