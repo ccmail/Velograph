@@ -4,111 +4,175 @@ This directory tracks the development progress of the GQL parser integration.
 
 ## Current Status
 
-### Phase: P0 - ANTLR4 GQL Parser Integration
+### Phase: P1 - Standard Visitor Pattern with Full GQL AST
 
 **Status**: Compilation and basic testing PASSED.
 
+**Refactoring**: Replaced `dynamic_cast` tree traversal with standard ANTLR4 Visitor pattern (following PromQL precedent). Extended AST node hierarchy to support complete GQL syntax.
+
 ## Implementation Summary
 
-### Files Created
+### Directory Structure
 
-| File | Description |
-|------|-------------|
-| `src/Parsers/Graph/grammar/GQL.g4` | GQL ANTLR4 grammar (from opengql/grammar, 3774 lines) |
-| `src/Parsers/Graph/grammar/generate.sh` | Script to regenerate C++ from GQL.g4 |
-| `src/Parsers/Graph/generated/` | Generated C++ Lexer/Parser (8 files, ~64K lines) |
-| `src/Parsers/Graph/ASTGraphQuery.h` | Graph AST node classes |
-| `src/Parsers/Graph/ASTGraphQuery.cpp` | AST formatting implementation |
-| `src/Parsers/Graph/GQLParsingUtil.h` | GQL parsing utility interface |
-| `src/Parsers/Graph/GQLParsingUtil.cpp` | ANTLR parse tree traversal implementation |
-| `src/Parsers/Graph/ParserGraphQuery.h` | Parser entry point interface |
-| `src/Parsers/Graph/ParserGraphQuery.cpp` | Parser entry point implementation |
-
-### Files Modified
-
-| File | Change |
-|------|--------|
-| `src/Parsers/CMakeLists.txt` | Build `_gql_grammar` library from generated sources, linked to `clickhouse_parsers` |
-| `src/Parsers/ParserQuery.cpp` | Registered `ParserGraphQuery` as first parser option |
-| `src/configure_config.cmake` | Added `USE_GQL_GRAMMAR` flag (checks `antlr4_cpp_runtime` target) |
-| `src/Common/config.h.in` | Added `#cmakedefine01 USE_GQL_GRAMMAR` |
-
-### Architecture Decisions
-
-1. **Grammar**: Using the full GQL.g4 grammar as-is (not trimmed). The ANTLR parser handles all GQL syntax; we only implement visitor methods for the subset we need.
-
-2. **Generation model**: Following PromQL precedent - generated C++ files are committed to the repo. The `generate.sh` script is for regeneration when the grammar changes.
-
-3. **AST design**: Minimal AST classes for Phase 0:
-   - `ASTGraphQuery` - top-level MATCH query
-   - `ASTGraphPattern` - pattern chain (alternating nodes and edges)
-   - `ASTNodePattern` - `(variable:Label)`
-   - `ASTEdgePattern` - `-[variable:Label]->`
-   - `ASTGraphReturnClause` - RETURN clause
-   - `ASTGraphReturnItem` - individual return item
-
-4. **Parser priority**: `ParserGraphQuery` is registered first in `ParserQuery::parseImpl` to intercept `MATCH` keyword before it reaches SQL parsers.
-
-5. **Conditional compilation**: All ANTLR code is guarded by `#if USE_GQL_GRAMMAR`, following the `USE_ANTLR4_GRAMMARS` pattern.
-
-## Supported GQL Subset (Phase 0)
-
-```gql
--- Node scan
-MATCH (a:Person) RETURN a
-
--- Single edge traversal
-MATCH (a:Person)-[:FOLLOWS]->(b:Person) RETURN b.name
-
--- Multi-hop pattern
-MATCH (a:Person)-[:FOLLOWS]->(b:Person)-[:WORKS_AT]->(c:Company) RETURN c.name
-
--- Reverse edge
-MATCH (a:Person)<-[:FOLLOWS]-(b:Person) RETURN b
+```
+src/Parsers/Graph/
+  grammar/
+    GQL.g4                 -- Full GQL ANTLR4 grammar (opengql/grammar)
+    generate.sh            -- C++ code generation script
+  generated/
+    GQLLexer.h/cpp         -- Generated lexer
+    GQLParser.h/cpp        -- Generated parser (610 visitor methods)
+    GQLVisitor.h/cpp       -- Generated visitor interface
+    GQLBaseVisitor.h/cpp   -- Generated visitor base class
+  ASTGraphQuery.h/cpp      -- Graph AST node classes (9 classes)
+  GQLParsingUtil.h/cpp     -- GQLASTBuilder visitor implementation
+  ParserGraphQuery.h/cpp   -- ClickHouse parser entry point
 ```
 
-## Not Yet Supported
+### AST Node Classes
 
-- WHERE clause parsing (AST slot exists, visitor not yet connected)
-- RETURN expression parsing (only simple property access)
-- CREATE PROPERTY GRAPH DDL
-- Variable-length paths (`*1..N`)
-- Label expressions with boolean operators
-- OPTIONAL MATCH
-- Aggregations in RETURN
+| Class | Fields | Description |
+|-------|--------|-------------|
+| `ASTLabelExpression` | `op`, `label_name` | Label boolean expression tree (Name/And/Or/Not/Wildcard) |
+| `ASTPathQuantifier` | `min_hops`, `max_hops` | Path quantifier: `*`, `+`, `?`, `{n}`, `{n,m}` |
+| `ASTNodePattern` | `variable`, `label`, `label_expression`, `where_predicate` | Node pattern `(a:Person WHERE ...)` |
+| `ASTEdgePattern` | `variable`, `label`, `direction`, `label_expression`, `quantifier`, `where_predicate` | Edge pattern `-[r:KNOWS*1..5]->` |
+| `ASTPathPattern` | `path_mode`, `search_prefix`, `search_count`, `path_variable`, `where_predicate` | Path with mode/search: `SHORTEST 3 TRAIL PATHS` |
+| `ASTGraphPattern` | (children) | Container for path patterns |
+| `ASTGraphReturnItem` | `alias` | Single return item with optional alias |
+| `ASTGraphReturnClause` | `distinct`, `group_by`, `order_by`, `limit`, `offset` | Full RETURN clause |
+| `ASTGraphQuery` | `graph_name`, `is_optional_match`, `match_pattern`, `where_condition`, `return_clause` | Top-level query |
 
-## Known Issues
+### Enums
 
-- [ ] Token reconstruction in `ParserGraphQuery.cpp` is naive (space-separated)
-- [ ] Error position mapping from ANTLR to ClickHouse position is approximate
-- [ ] Property access (`a.name`) uses `tupleElement` function which may not be ideal
+| Enum | Values |
+|------|--------|
+| `GraphEdgeDirection` | `RIGHT`, `LEFT`, `UNDIRECTED`, `LEFT_OR_UNDIRECTED`, `UNDIRECTED_OR_RIGHT`, `LEFT_OR_RIGHT`, `ANY` |
+| `GraphPathMode` | `DEFAULT`, `WALK`, `TRAIL`, `SIMPLE`, `ACYCLIC` |
+| `GraphPathSearch` | `NONE`, `ALL`, `ANY`, `SHORTEST`, `ALL_SHORTEST`, `ANY_SHORTEST`, `COUNTED_SHORTEST`, `COUNTED_SHORTEST_GROUP` |
+| `GraphLabelOp` | `NAME`, `CONJUNCTION`, `DISJUNCTION`, `NEGATION`, `WILDCARD` |
+
+### Visitor Implementation (`GQLASTBuilder`)
+
+Extends `GQLBaseVisitor` with the following overrides:
+
+**Match & Pattern (8 methods):**
+`visitSimpleMatchStatement`, `visitGraphPattern`, `visitPathPattern`, `visitPpePathTerm`, `visitPathTerm`, `visitElementPattern`, `visitNodePattern`, `visitEdgePattern`
+
+**Path Quantifiers (3 methods):**
+`visitPfPathPrimary`, `visitPfQuantifiedPathPrimary`, `visitPfQuestionedPathPrimary`
+
+**Parenthesized Paths (2 methods):**
+`visitPpParenthesizedPathPatternExpression`, `visitParenthesizedPathPatternExpression`
+
+**Label Expressions (6 methods):**
+`visitLabelExpressionName`, `visitLabelExpressionWildcard`, `visitLabelExpressionNegation`, `visitLabelExpressionConjunction`, `visitLabelExpressionDisjunction`, `visitLabelExpressionParenthesized`
+
+**Value Expressions (12 methods):**
+`visitComparisonExprAlt`, `visitConjunctiveExprAlt`, `visitDisjunctiveExprAlt`, `visitNotExprAlt`, `visitAddSubtractExprAlt`, `visitMultDivExprAlt`, `visitConcatenationExprAlt`, `visitSignedExprAlt`, `visitIsNotExprAlt`, `visitPrimaryExprAlt`, `visitValueExpressionPrimary`, `visitParenthesizedValueExpression`
+
+**Literals & Variables (6 methods):**
+`visitBindingVariableReference`, `visitUnsignedValueSpecification`, `visitNonNegativeIntegerSpecification`, `visitUnsignedLiteral`, `visitUnsignedNumericLiteral`, `visitGeneralLiteral`
+
+**RETURN (4 methods):**
+`visitPrimitiveResultStatement`, `visitReturnStatement`, `visitAggregatingValueExpression`, `visitOrderByAndPageStatement`
+
+**WHERE (2 methods):**
+`visitSearchCondition`, `visitBooleanValueExpression`
+
+### Expression Mapping Strategy
+
+GQL expressions are mapped to ClickHouse AST:
+
+| GQL Expression | ClickHouse AST |
+|---------------|----------------|
+| `a = b` | `ASTFunction("equals", [a, b])` |
+| `a <> b` | `ASTFunction("notEquals", [a, b])` |
+| `a AND b` | `ASTFunction("and", [a, b])` |
+| `a OR b` | `ASTFunction("or", [a, b])` |
+| `NOT a` | `ASTFunction("not", [a])` |
+| `a + b` | `ASTFunction("plus", [a, b])` |
+| `a.prop` | `ASTFunction("tupleElement", [a, "prop"])` |
+| Variable `x` | `ASTIdentifier("x")` |
+| Numeric `42` | `ASTLiteral(42)` |
+| String `'hello'` | `ASTLiteral("hello")` |
+| `NULL` | `ASTLiteral(Null)` |
+
+## Supported GQL Subset
+
+```gql
+-- Node scan with label
+MATCH (a:Person)
+
+-- Edge traversal with all 7 direction types
+MATCH (a:Person)-[e:KNOWS]->(b:Person)   -- RIGHT
+MATCH (a)<-[e:FOLLOWS]-(b)               -- LEFT
+MATCH (a)~[e:SIMILAR]~(b)                -- UNDIRECTED
+MATCH (a)-[e]->(b)                        -- ANY
+
+-- Label expressions with boolean operators
+MATCH (n:Person&Employee)                 -- Conjunction
+MATCH (n:Person|Company)                  -- Disjunction
+MATCH (n:!Person)                         -- Negation
+MATCH (n:%)                               -- Wildcard
+
+-- Variable-length paths with quantifiers
+MATCH (a)-[e:KNOWS*]->(b)                -- * (0..inf)
+MATCH (a)-[e:KNOWS+]->(b)                -- + (1..inf)
+MATCH (a)-[e:KNOWS?]->(b)                -- ? (0..1)
+MATCH (a)-[e:KNOWS{3}]->(b)              -- {n} (exactly n)
+MATCH (a)-[e:KNOWS{2,5}]->(b)            -- {n,m} (range)
+
+-- Path modes and search prefixes
+MATCH TRAIL (a)-[]->(b)                   -- TRAIL mode
+MATCH SHORTEST 3 (a)-[]->(b)             -- SHORTEST n search
+MATCH ALL SHORTEST (a)-[]->(b)           -- ALL SHORTEST
+
+-- WHERE clause with expressions
+MATCH (a:Person) WHERE a.age > 30
+MATCH (a)-[e]->(b) WHERE a.name = 'Alice' AND b.city <> 'NYC'
+
+-- RETURN with aliases, DISTINCT, ORDER BY, LIMIT, OFFSET
+MATCH (a:Person) RETURN a.name AS name, a.age
+MATCH (a:Person) RETURN DISTINCT a.city ORDER BY a.name LIMIT 10 OFFSET 5
+```
+
+## Not Yet Implemented (Parser-Level)
+
+- CREATE PROPERTY GRAPH DDL (grammar parsed, no AST builder)
+- INSERT / SET / DELETE DML
+- OPTIONAL MATCH (AST field exists, visitor not connected)
+- UNION / EXCEPT / INTERSECT
+- Subqueries and EXISTS predicate
+- LET / FOR clauses
+- CALL procedures
+- SELECT statement (alternative to RETURN)
+- CASE expressions
+- Aggregate functions (COUNT, SUM, etc.)
 
 ## Build and Test Results
 
 ### Compilation
-- Full `clickhouse` binary builds successfully with the GQL parser integrated.
-- Generated ANTLR4 code compiles with `-w` flag to suppress warnings.
-- Host code uses `#pragma clang diagnostic` to isolate ANTLR header warnings.
+- Full `clickhouse` binary builds successfully.
+- Generated ANTLR4 code in `src/Parsers/Graph/generated/` with `-w` flag.
+- `GQLParsingUtil.cpp` uses `#pragma clang diagnostic` for ANTLR headers.
 
 ### Runtime Tests
 ```
 $ clickhouse local --query "MATCH (n:Person)"
-Code: 78. DB::Exception: Unknown type of query: GraphQuery. (UNKNOWN_TYPE_OF_QUERY)
+Code: 78. UNKNOWN_TYPE_OF_QUERY  (expected - no InterpreterGraphQuery yet)
 
 $ clickhouse local --query "MATCH (a:Person)-[e:KNOWS]->(b:Person)"
-Code: 78. DB::Exception: Unknown type of query: GraphQuery. (UNKNOWN_TYPE_OF_QUERY)
+Code: 78. UNKNOWN_TYPE_OF_QUERY  (expected)
 
-$ clickhouse local --query "SELECT 1 + 2 AS result"
-3
+$ clickhouse local --query "SELECT 42 AS answer"
+42  (standard SQL unaffected)
 ```
-
-- `UNKNOWN_TYPE_OF_QUERY` is expected -- parser works, but `InterpreterGraphQuery` is not yet implemented.
-- Standard SQL queries continue to work correctly.
 
 ## Next Steps
 
-1. Add WHERE clause visitor
-2. Add RETURN expression parsing
-3. Create unit tests
-4. Implement `InterpreterGraphQuery` (Phase P1)
-5. Connect to Graph Catalog and expand-based execution (Phase P2)
+1. Implement `InterpreterGraphQuery` (translate Graph AST to ClickHouse query plan)
+2. Implement Graph Catalog (`CREATE PROPERTY GRAPH` mapping)
+3. Implement expand-based graph operators (`GraphScanStep`, `GraphExpandStep`)
+4. Add unit tests for the parser
+5. Connect DDL/DML visitors
