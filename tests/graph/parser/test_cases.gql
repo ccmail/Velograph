@@ -52,20 +52,20 @@ MATCH (n:%)
 
 -- ==================== Path Quantifiers ====================
 
--- PARSE OK: star (0..inf)
-MATCH (a)-[e:KNOWS*]->(b)
+-- PARSE OK: star (0..inf) - GQL syntax: quantifier after edge arrow
+MATCH (a)-[e:KNOWS]->*(b)
 
 -- PARSE OK: plus (1..inf)
-MATCH (a)-[e:KNOWS+]->(b)
+MATCH (a)-[e:KNOWS]->+(b)
 
 -- PARSE OK: question (0..1)
-MATCH (a)-[e:KNOWS?]->(b)
+MATCH (a)-[e:KNOWS]->?(b)
 
 -- PARSE OK: fixed {n}
-MATCH (a)-[e:KNOWS{3}]->(b)
+MATCH (a)-[e:KNOWS]->{3}(b)
 
 -- PARSE OK: range {n,m}
-MATCH (a)-[e:KNOWS{2,5}]->(b)
+MATCH (a)-[e:KNOWS]->{2,5}(b)
 
 -- ==================== WHERE Clause ====================
 
