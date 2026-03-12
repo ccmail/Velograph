@@ -1,0 +1,112 @@
+-- LDBC SNB Interactive Short Queries (IS1-IS7)
+-- Converted from Cypher to GQL (ISO/IEC 39075)
+-- Source: https://github.com/ldbc/ldbc_snb_interactive_v1_impls/tree/main/cypher/queries
+
+--------------------------------------------------------------------------------
+-- IS1: Profile of a person
+-- STATUS: PARSE_OK
+-- FEATURES: MATCH, WHERE, property-access, RETURN
+-- ORIGIN: interactive-short-1.cypher
+--------------------------------------------------------------------------------
+MATCH (n:Person)-[:IS_LOCATED_IN]->(p:City)
+WHERE n.id = $personId
+RETURN
+    n.firstName AS firstName,
+    n.lastName AS lastName,
+    n.birthday AS birthday,
+    n.locationIP AS locationIP,
+    n.browserUsed AS browserUsed,
+    p.id AS cityId,
+    n.gender AS gender,
+    n.creationDate AS creationDate
+
+--------------------------------------------------------------------------------
+-- IS2: Recent messages of a person
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, RETURN, ORDER BY, LIMIT, variable-length-path,
+--           COALESCE, reverse-edge
+-- ORIGIN: interactive-short-2.cypher
+-- NOTE: Requires variable-length REPLY_OF path and multi-statement queries
+--------------------------------------------------------------------------------
+MATCH (:Person WHERE id = $personId)<-[:HAS_CREATOR]-(message:Message)
+WHERE message.creationDate <= $maxDate
+RETURN
+    message.id AS messageId,
+    COALESCE(message.content, message.imageFile) AS messageContent,
+    message.creationDate AS messageCreationDate
+ORDER BY messageCreationDate DESC, messageId ASC
+LIMIT 10
+
+--------------------------------------------------------------------------------
+-- IS3: Friends of a person
+-- STATUS: PARSE_OK
+-- FEATURES: MATCH, WHERE, RETURN, ORDER BY, undirected-edge
+-- ORIGIN: interactive-short-3.cypher
+--------------------------------------------------------------------------------
+MATCH (n:Person)-[r:KNOWS]-(friend:Person)
+WHERE n.id = $personId
+RETURN
+    friend.id AS personId,
+    friend.firstName AS firstName,
+    friend.lastName AS lastName,
+    r.creationDate AS friendshipCreationDate
+ORDER BY friendshipCreationDate DESC, personId ASC
+
+--------------------------------------------------------------------------------
+-- IS4: Content of a message
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, RETURN, COALESCE
+-- ORIGIN: interactive-short-4.cypher
+--------------------------------------------------------------------------------
+MATCH (m:Message)
+WHERE m.id = $messageId
+RETURN
+    m.creationDate AS messageCreationDate,
+    COALESCE(m.content, m.imageFile) AS messageContent
+
+--------------------------------------------------------------------------------
+-- IS5: Creator of a message
+-- STATUS: PARSE_OK
+-- FEATURES: MATCH, WHERE, RETURN, edge-traversal
+-- ORIGIN: interactive-short-5.cypher
+--------------------------------------------------------------------------------
+MATCH (m:Message)-[:HAS_CREATOR]->(p:Person)
+WHERE m.id = $messageId
+RETURN
+    p.id AS personId,
+    p.firstName AS firstName,
+    p.lastName AS lastName
+
+--------------------------------------------------------------------------------
+-- IS6: Forum of a message
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, RETURN, variable-length-path (REPLY_OF*0..)
+-- ORIGIN: interactive-short-6.cypher
+-- NOTE: Requires variable-length REPLY_OF path with 0..inf quantifier
+--------------------------------------------------------------------------------
+MATCH (m:Message)-[:REPLY_OF]->{0,}(p:Post)<-[:CONTAINER_OF]-(f:Forum)-[:HAS_MODERATOR]->(mod:Person)
+WHERE m.id = $messageId
+RETURN
+    f.id AS forumId,
+    f.title AS forumTitle,
+    mod.id AS moderatorId,
+    mod.firstName AS moderatorFirstName,
+    mod.lastName AS moderatorLastName
+
+--------------------------------------------------------------------------------
+-- IS7: Replies of a message
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, RETURN, OPTIONAL MATCH, CASE, reverse-edge
+-- ORIGIN: interactive-short-7.cypher
+-- NOTE: Requires OPTIONAL MATCH and CASE expression
+--------------------------------------------------------------------------------
+MATCH (m:Message)<-[:REPLY_OF]-(c:Comment)-[:HAS_CREATOR]->(p:Person)
+WHERE m.id = $messageId
+RETURN
+    c.id AS commentId,
+    c.content AS commentContent,
+    c.creationDate AS commentCreationDate,
+    p.id AS replyAuthorId,
+    p.firstName AS replyAuthorFirstName,
+    p.lastName AS replyAuthorLastName
+ORDER BY commentCreationDate DESC, replyAuthorId ASC

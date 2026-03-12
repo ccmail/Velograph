@@ -169,10 +169,31 @@ $ clickhouse local --query "SELECT 42 AS answer"
 42  (standard SQL unaffected)
 ```
 
+## LDBC Test-Driven Development
+
+We use LDBC Social Network Benchmark queries as test-driven development targets.
+The GQL versions of LDBC queries are located at `tests/graph/ldbc/`.
+
+**Current coverage:**
+
+| Query Set | Total | PARSE_OK | PARSE_FAIL |
+|-----------|-------|----------|------------|
+| IS (short) 1-7 | 7 | 3 | 4 |
+| IC (complex) 1-14 | 14 | 1 | 13 |
+| OpenGQL samples | 9 | 0 | 9 |
+| **Total** | **30** | **4** | **26** |
+
+Each query is annotated with required GQL features. As features are implemented,
+more queries will transition from PARSE_FAIL to PARSE_OK and eventually EXEC_OK.
+
+See `tests/graph/ldbc/README.md` for details on the Cypher-to-GQL conversion and
+the LDBC SNB data model.
+
 ## Next Steps
 
 1. Implement `InterpreterGraphQuery` (translate Graph AST to ClickHouse query plan)
 2. Implement Graph Catalog (`CREATE PROPERTY GRAPH` mapping)
 3. Implement expand-based graph operators (`GraphScanStep`, `GraphExpandStep`)
-4. Add unit tests for the parser
-5. Connect DDL/DML visitors
+4. Connect DDL/DML visitors (CREATE GRAPH, INSERT)
+5. Add OPTIONAL MATCH, CASE, aggregation support
+6. Implement `ANY SHORTEST` / `ALL SHORTEST` path search
