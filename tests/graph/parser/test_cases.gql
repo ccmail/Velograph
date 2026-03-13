@@ -1,0 +1,118 @@
+-- GQL Parser Test Cases
+-- Each query is annotated with expected behavior.
+-- "PARSE OK" = parser should succeed (interpreter not yet implemented)
+-- "PARSE ERROR" = parser should reject with syntax error
+
+-- ==================== Node Patterns ====================
+
+-- PARSE OK: simple node scan with label
+MATCH (n:Person)
+
+-- PARSE OK: node without label
+MATCH (x)
+
+-- PARSE OK: node with variable only
+MATCH (a:User)
+
+-- ==================== Edge Patterns ====================
+
+-- PARSE OK: right-directed edge
+MATCH (a:Person)-[e:KNOWS]->(b:Person)
+
+-- PARSE OK: left-directed edge
+MATCH (a:Person)<-[e:FOLLOWS]-(b:Person)
+
+-- PARSE OK: undirected edge
+MATCH (a:Person)~[e:SIMILAR]~(b:Person)
+
+-- PARSE OK: any-direction edge
+MATCH (a)-[e]-(b)
+
+-- ==================== Multi-Hop Paths ====================
+
+-- PARSE OK: two-hop path
+MATCH (a:Person)-[e1:FOLLOWS]->(b:Person)-[e2:WORKS_AT]->(c:Company)
+
+-- PARSE OK: three-hop path
+MATCH (a)-[]->(b)-[]->(c)-[]->(d)
+
+-- ==================== Label Expressions ====================
+
+-- PARSE OK: conjunction
+MATCH (n:Person&Employee)
+
+-- PARSE OK: disjunction
+MATCH (n:Person|Company)
+
+-- PARSE OK: negation
+MATCH (n:!Person)
+
+-- PARSE OK: wildcard
+MATCH (n:%)
+
+-- ==================== Path Quantifiers ====================
+
+-- PARSE OK: star (0..inf) - GQL syntax: quantifier after edge arrow
+MATCH (a)-[e:KNOWS]->*(b)
+
+-- PARSE OK: plus (1..inf)
+MATCH (a)-[e:KNOWS]->+(b)
+
+-- PARSE OK: question (0..1)
+MATCH (a)-[e:KNOWS]->?(b)
+
+-- PARSE OK: fixed {n}
+MATCH (a)-[e:KNOWS]->{3}(b)
+
+-- PARSE OK: range {n,m}
+MATCH (a)-[e:KNOWS]->{2,5}(b)
+
+-- ==================== WHERE Clause ====================
+
+-- PARSE OK: simple comparison
+MATCH (a:Person) WHERE a.age > 30
+
+-- PARSE OK: equality with string literal
+MATCH (a:Person) WHERE a.name = 'Alice'
+
+-- PARSE OK: boolean AND
+MATCH (a:Person) WHERE a.age > 20 AND a.age < 40
+
+-- PARSE OK: boolean OR
+MATCH (a:Person) WHERE a.city = 'NYC' OR a.city = 'LA'
+
+-- PARSE OK: NOT
+MATCH (a:Person) WHERE NOT a.active
+
+-- PARSE OK: arithmetic in WHERE
+MATCH (a:Person) WHERE a.salary * 12 > 100000
+
+-- ==================== RETURN Clause ====================
+
+-- PARSE OK: simple return
+MATCH (a:Person) RETURN a.name
+
+-- PARSE OK: return with alias
+MATCH (a:Person) RETURN a.name AS name, a.age AS age
+
+-- PARSE OK: return DISTINCT
+MATCH (a:Person) RETURN DISTINCT a.city
+
+-- PARSE OK: return with ORDER BY and LIMIT
+MATCH (a:Person) RETURN a.name ORDER BY a.name LIMIT 10
+
+-- PARSE OK: return with OFFSET
+MATCH (a:Person) RETURN a.name ORDER BY a.age LIMIT 10 OFFSET 5
+
+-- ==================== Combined ====================
+
+-- PARSE OK: full query
+MATCH (a:Person)-[e:KNOWS]->(b:Person) WHERE a.age > 25 RETURN a.name AS from_name, b.name AS to_name ORDER BY a.age LIMIT 100
+
+-- ==================== Syntax Errors ====================
+
+-- PARSE ERROR: incomplete pattern
+MATCH (a:Person)-[
+
+-- PARSE ERROR: invalid syntax
+MATCH INVALID SYNTAX !!!

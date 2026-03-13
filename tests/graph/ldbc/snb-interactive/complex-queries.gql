@@ -1,0 +1,264 @@
+-- LDBC SNB Interactive Complex Queries (IC1-IC14)
+-- Converted from Cypher to GQL (ISO/IEC 39075)
+-- Source: https://github.com/ldbc/ldbc_snb_interactive_v1_impls/tree/main/cypher/queries
+
+--------------------------------------------------------------------------------
+-- IC1: Transitive friends with certain name
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, variable-length-path ({1,3}), ANY SHORTEST,
+--           OPTIONAL MATCH, CASE, ORDER BY, LIMIT, multi-statement
+-- ORIGIN: interactive-complex-1.cypher
+-- NOTE: Most complex query. Requires shortest path, OPTIONAL MATCH, CASE,
+--       list comprehension, and multi-statement chaining.
+--------------------------------------------------------------------------------
+MATCH (p:Person)-[:KNOWS]->{1,3}(friend:Person)
+WHERE p.id = $personId
+  AND friend.firstName = $firstName
+  AND p <> friend
+RETURN
+    friend.id AS friendId,
+    friend.lastName AS friendLastName,
+    friend.birthday AS friendBirthday,
+    friend.creationDate AS friendCreationDate,
+    friend.gender AS friendGender,
+    friend.browserUsed AS friendBrowserUsed,
+    friend.locationIP AS friendLocationIp
+ORDER BY friendLastName ASC, friendId ASC
+LIMIT 20
+
+--------------------------------------------------------------------------------
+-- IC2: Recent messages by your friends
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, RETURN, ORDER BY, LIMIT, reverse-edge, COALESCE
+-- ORIGIN: interactive-complex-2.cypher
+--------------------------------------------------------------------------------
+MATCH (:Person WHERE id = $personId)-[:KNOWS]-(friend:Person)<-[:HAS_CREATOR]-(message:Message)
+WHERE message.creationDate <= $maxDate
+RETURN
+    friend.id AS personId,
+    friend.firstName AS personFirstName,
+    friend.lastName AS personLastName,
+    message.id AS postOrCommentId,
+    COALESCE(message.content, message.imageFile) AS postOrCommentContent,
+    message.creationDate AS postOrCommentCreationDate
+ORDER BY postOrCommentCreationDate DESC, postOrCommentId ASC
+LIMIT 20
+
+--------------------------------------------------------------------------------
+-- IC3: Friends and friends of friends in given countries
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, variable-length-path ({1,2}), aggregation (SUM),
+--           multi-statement, ORDER BY, LIMIT
+-- ORIGIN: interactive-complex-3.cypher
+-- NOTE: Requires multi-statement chaining and aggregation
+--------------------------------------------------------------------------------
+MATCH (person:Person)-[:KNOWS]->{1,2}(friend:Person)-[:IS_LOCATED_IN]->(city:City)
+WHERE person.id = $personId
+  AND person <> friend
+MATCH (friend)<-[:HAS_CREATOR]-(message:Message)-[:IS_LOCATED_IN]->(country:Country)
+WHERE message.creationDate >= $startDate
+  AND message.creationDate < $endDate
+  AND (country.name = $countryXName OR country.name = $countryYName)
+RETURN
+    friend.id AS friendId,
+    friend.firstName AS friendFirstName,
+    friend.lastName AS friendLastName
+ORDER BY friendId ASC
+LIMIT 20
+
+--------------------------------------------------------------------------------
+-- IC4: New topics
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, undirected-edge, aggregation (SUM, COUNT),
+--           CASE, multi-statement
+-- ORIGIN: interactive-complex-4.cypher
+--------------------------------------------------------------------------------
+MATCH (person:Person)-[:KNOWS]-(friend:Person),
+      (friend)<-[:HAS_CREATOR]-(post:Post)-[:HAS_TAG]->(tag:Tag)
+WHERE person.id = $personId
+  AND post.creationDate >= $startDate
+  AND post.creationDate < $endDate
+RETURN
+    tag.name AS tagName,
+    COUNT(post) AS postCount
+ORDER BY postCount DESC, tagName ASC
+LIMIT 10
+
+--------------------------------------------------------------------------------
+-- IC5: New groups
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, variable-length-path ({1,2}), OPTIONAL MATCH,
+--           aggregation (COUNT), ORDER BY, LIMIT
+-- ORIGIN: interactive-complex-5.cypher
+--------------------------------------------------------------------------------
+MATCH (person:Person)-[:KNOWS]->{1,2}(friend:Person)
+WHERE person.id = $personId
+  AND person <> friend
+MATCH (friend)<-[:HAS_MEMBER]-(forum:Forum)
+RETURN
+    forum.title AS forumName,
+    COUNT(friend) AS memberCount
+ORDER BY memberCount DESC, forum.id ASC
+LIMIT 20
+
+--------------------------------------------------------------------------------
+-- IC6: Tag co-occurrence
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, variable-length-path ({1,2}), reverse-edge,
+--           aggregation (COUNT), ORDER BY, LIMIT
+-- ORIGIN: interactive-complex-6.cypher
+--------------------------------------------------------------------------------
+MATCH (person:Person)-[:KNOWS]->{1,2}(friend:Person)
+WHERE person.id = $personId
+  AND person <> friend
+MATCH (friend)<-[:HAS_CREATOR]-(post:Post)-[:HAS_TAG]->(knownTag:Tag),
+      (post)-[:HAS_TAG]->(tag:Tag)
+WHERE knownTag.name = $tagName
+  AND tag <> knownTag
+RETURN
+    tag.name AS tagName,
+    COUNT(post) AS postCount
+ORDER BY postCount DESC, tagName ASC
+LIMIT 10
+
+--------------------------------------------------------------------------------
+-- IC7: Recent likers
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, reverse-edge, ORDER BY, LIMIT,
+--           OPTIONAL MATCH, COALESCE
+-- ORIGIN: interactive-complex-7.cypher
+--------------------------------------------------------------------------------
+MATCH (person:Person)<-[:HAS_CREATOR]-(message:Message)<-[:LIKES]-(liker:Person)
+WHERE person.id = $personId
+RETURN
+    liker.id AS personId,
+    liker.firstName AS personFirstName,
+    liker.lastName AS personLastName,
+    message.id AS commentOrPostId,
+    COALESCE(message.content, message.imageFile) AS commentOrPostContent
+ORDER BY personId ASC
+LIMIT 20
+
+--------------------------------------------------------------------------------
+-- IC8: Recent replies
+-- STATUS: PARSE_OK
+-- FEATURES: MATCH, WHERE, reverse-edge, multi-hop, ORDER BY, LIMIT, RETURN
+-- ORIGIN: interactive-complex-8.cypher
+--------------------------------------------------------------------------------
+MATCH (start:Person)<-[:HAS_CREATOR]-(:Message)<-[:REPLY_OF]-(comment:Comment)-[:HAS_CREATOR]->(person:Person)
+WHERE start.id = $personId
+RETURN
+    person.id AS personId,
+    person.firstName AS personFirstName,
+    person.lastName AS personLastName,
+    comment.creationDate AS commentCreationDate,
+    comment.id AS commentId,
+    comment.content AS commentContent
+ORDER BY commentCreationDate DESC, commentId ASC
+LIMIT 20
+
+--------------------------------------------------------------------------------
+-- IC9: Recent messages by friends or friends of friends
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, variable-length-path ({1,2}), COALESCE,
+--           ORDER BY, LIMIT
+-- ORIGIN: interactive-complex-9.cypher
+--------------------------------------------------------------------------------
+MATCH (root:Person)-[:KNOWS]->{1,2}(friend:Person)
+WHERE root.id = $personId
+  AND friend <> root
+MATCH (friend)<-[:HAS_CREATOR]-(message:Message)
+WHERE message.creationDate < $maxDate
+RETURN
+    friend.id AS personId,
+    friend.firstName AS personFirstName,
+    friend.lastName AS personLastName,
+    message.id AS commentOrPostId,
+    COALESCE(message.content, message.imageFile) AS commentOrPostContent,
+    message.creationDate AS commentOrPostCreationDate
+ORDER BY commentOrPostCreationDate DESC, message.id ASC
+LIMIT 20
+
+--------------------------------------------------------------------------------
+-- IC10: Friend recommendation
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, variable-length-path ({2,2}), OPTIONAL MATCH,
+--           aggregation (COUNT), boolean expressions, ORDER BY, LIMIT
+-- ORIGIN: interactive-complex-10.cypher
+--------------------------------------------------------------------------------
+MATCH (person:Person)-[:KNOWS]->{2,2}(friend:Person)-[:IS_LOCATED_IN]->(city:City)
+WHERE person.id = $personId
+  AND friend <> person
+RETURN
+    friend.id AS personId,
+    friend.firstName AS personFirstName,
+    friend.lastName AS personLastName,
+    friend.gender AS personGender,
+    city.name AS personCityName
+ORDER BY personId ASC
+LIMIT 10
+
+--------------------------------------------------------------------------------
+-- IC11: Job referral
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, variable-length-path ({1,2}), multi-hop,
+--           ORDER BY, LIMIT
+-- ORIGIN: interactive-complex-11.cypher
+--------------------------------------------------------------------------------
+MATCH (person:Person)-[:KNOWS]->{1,2}(friend:Person)
+WHERE person.id = $personId
+  AND person <> friend
+MATCH (friend)-[workAt:WORK_AT]->(company:Company)-[:IS_LOCATED_IN]->(:Country WHERE name = $countryName)
+WHERE workAt.workFrom < $workFromYear
+RETURN
+    friend.id AS personId,
+    friend.firstName AS personFirstName,
+    friend.lastName AS personLastName,
+    company.name AS organizationName,
+    workAt.workFrom AS organizationWorkFromYear
+ORDER BY organizationWorkFromYear ASC, personId ASC, organizationName DESC
+LIMIT 10
+
+--------------------------------------------------------------------------------
+-- IC12: Expert search
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, variable-length-path (HAS_TYPE|IS_SUBCLASS_OF {0,}),
+--           label-disjunction (|), aggregation (COUNT, DISTINCT),
+--           ORDER BY, LIMIT
+-- ORIGIN: interactive-complex-12.cypher
+--------------------------------------------------------------------------------
+MATCH (person:Person)-[:KNOWS]-(friend:Person)<-[:HAS_CREATOR]-(comment:Comment)-[:REPLY_OF]->(post:Post)-[:HAS_TAG]->(tag:Tag)
+WHERE person.id = $personId
+RETURN
+    friend.id AS personId,
+    friend.firstName AS personFirstName,
+    friend.lastName AS personLastName,
+    COUNT(comment) AS replyCount
+ORDER BY replyCount DESC, personId ASC
+LIMIT 20
+
+--------------------------------------------------------------------------------
+-- IC13: Single shortest path
+-- STATUS: PARSE_FAIL
+-- FEATURES: ANY SHORTEST, MATCH, WHERE, variable-length-path (*),
+--           path-variable, CASE expression
+-- ORIGIN: interactive-complex-13.cypher
+-- NOTE: Core graph algorithm query - shortest path between two persons
+--------------------------------------------------------------------------------
+MATCH ANY SHORTEST (person1:Person)-[:KNOWS]->*(person2:Person)
+WHERE person1.id = $person1Id
+  AND person2.id = $person2Id
+RETURN 1 AS shortestPathLength
+
+--------------------------------------------------------------------------------
+-- IC14: Trusted connection paths
+-- STATUS: PARSE_FAIL
+-- FEATURES: ALL SHORTEST, MATCH, WHERE, variable-length-path ({0,}),
+--           path-variable, aggregation, subquery
+-- ORIGIN: interactive-complex-14.cypher
+-- NOTE: Requires ALL SHORTEST path search and weight computation
+--------------------------------------------------------------------------------
+MATCH ALL SHORTEST (person1:Person)-[:KNOWS]->{0,}(person2:Person)
+WHERE person1.id = $person1Id
+  AND person2.id = $person2Id
+RETURN person1.id AS person1Id, person2.id AS person2Id

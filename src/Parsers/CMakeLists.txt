@@ -7,6 +7,20 @@ add_headers_and_sources(clickhouse_parsers ./Kusto)
 add_headers_and_sources(clickhouse_parsers ./PRQL)
 add_headers_and_sources(clickhouse_parsers ./Kusto/KustoFunctions)
 add_headers_and_sources(clickhouse_parsers ./Prometheus)
+add_headers_and_sources(clickhouse_parsers ./graph)
+
+# GQL grammar: build generated ANTLR4 parser as a separate library
+if (TARGET ch_contrib::antlr4_cpp_runtime)
+    file(GLOB GQL_GENERATED_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/graph/generated/*.cpp")
+    file(GLOB GQL_GENERATED_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/graph/generated/*.h")
+
+    add_library(_gql_grammar ${GQL_GENERATED_SOURCES} ${GQL_GENERATED_HEADERS})
+    target_include_directories(_gql_grammar SYSTEM PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/graph/generated")
+    target_link_libraries(_gql_grammar PUBLIC ch_contrib::antlr4_cpp_runtime)
+    target_compile_options(_gql_grammar PRIVATE -w)
+
+    add_library(ch_contrib::gql_grammar ALIAS _gql_grammar)
+endif ()
 
 add_library(clickhouse_parsers ${clickhouse_parsers_headers} ${clickhouse_parsers_sources})
 target_link_libraries(clickhouse_parsers PUBLIC clickhouse_common_io clickhouse_common_access)
@@ -17,6 +31,10 @@ endif ()
 
 if (TARGET ch_contrib::antlr4_grammars)
     target_link_libraries(clickhouse_parsers PRIVATE ch_contrib::antlr4_grammars)
+endif ()
+
+if (TARGET ch_contrib::gql_grammar)
+    target_link_libraries(clickhouse_parsers PRIVATE ch_contrib::gql_grammar)
 endif ()
 
 if(ENABLE_EXAMPLES)

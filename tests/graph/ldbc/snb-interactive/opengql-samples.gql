@@ -1,0 +1,84 @@
+-- OpenGQL Grammar Samples
+-- Source: https://github.com/opengql/grammar/tree/main/samples
+-- These are official syntax examples from the LDBC GQL Implementation Working Group
+
+--------------------------------------------------------------------------------
+-- CREATE GRAPH (various forms)
+-- STATUS: PARSE_FAIL
+-- FEATURES: CREATE GRAPH, graph-type, nested-graph-type, AS COPY OF
+-- ORIGIN: opengql/grammar samples/create_graph.gql
+--------------------------------------------------------------------------------
+CREATE GRAPH mygraph ANY
+
+--------------------------------------------------------------------------------
+-- CREATE GRAPH with inline type definition
+-- STATUS: PARSE_FAIL
+-- FEATURES: CREATE GRAPH, inline-graph-type, typed-properties
+--------------------------------------------------------------------------------
+CREATE GRAPH mygraph {
+  (Person :Person {lastname STRING, firstname STRING, joined DATE})
+}
+
+--------------------------------------------------------------------------------
+-- CREATE GRAPH from existing graph type
+-- STATUS: PARSE_FAIL
+-- FEATURES: CREATE GRAPH, graph-type-reference
+--------------------------------------------------------------------------------
+CREATE GRAPH mygraph mygraphtype
+
+--------------------------------------------------------------------------------
+-- CREATE GRAPH LIKE (copy structure)
+-- STATUS: PARSE_FAIL
+-- FEATURES: CREATE GRAPH, LIKE
+--------------------------------------------------------------------------------
+CREATE GRAPH mygraph LIKE mysrcgraph
+
+--------------------------------------------------------------------------------
+-- CREATE GRAPH AS COPY OF (copy data)
+-- STATUS: PARSE_FAIL
+-- FEATURES: CREATE GRAPH, AS COPY OF
+--------------------------------------------------------------------------------
+CREATE GRAPH mygraph ANY AS COPY OF mysrcgraph
+
+--------------------------------------------------------------------------------
+-- INSERT statement
+-- STATUS: PARSE_FAIL
+-- FEATURES: INSERT, node-pattern, edge-pattern, property-map
+-- ORIGIN: opengql/grammar samples/insert_statement.gql
+--------------------------------------------------------------------------------
+INSERT (:Person { firstname: 'Firstname', lastname: 'Lastname', joined: DATE '2023-01-01' })
+        -[:MEMBER_SINCE { since: '2023-03-20' }]->
+        (:Team { name: 'Teamname' })
+
+--------------------------------------------------------------------------------
+-- MATCH and INSERT
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, INSERT, element-pattern-predicate
+-- ORIGIN: opengql/grammar samples/match_and_insert_example.gql
+--------------------------------------------------------------------------------
+MATCH (a WHERE a.firstname = 'Robert'), (b WHERE b.lastname = 'Kowalski')
+INSERT (a)-[:GRADUATED]->(b)
+
+--------------------------------------------------------------------------------
+-- MATCH with EXISTS predicate (nested match in braces)
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, EXISTS, nested-query-specification
+-- ORIGIN: opengql/grammar samples/match_with_exists_predicate_*.gql
+--------------------------------------------------------------------------------
+MATCH (a:Account)
+WHERE EXISTS {
+    MATCH (a)-[:IS_BLOCKED_BY]->(b:Account WHERE b.isBlocked = TRUE)
+}
+RETURN a
+
+--------------------------------------------------------------------------------
+-- MATCH with EXISTS predicate (nested match statement)
+-- STATUS: PARSE_FAIL
+-- FEATURES: MATCH, WHERE, EXISTS, nested-match
+--------------------------------------------------------------------------------
+MATCH (a:Account)
+WHERE EXISTS {
+    MATCH (a)-[:OWNS]->(c:CreditCard)-[:IS_USED_IN]->(t:Transaction)
+    WHERE t.amount > 1000
+}
+RETURN a
