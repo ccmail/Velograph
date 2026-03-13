@@ -10,12 +10,15 @@
 #   - Ninja build system
 #   - ANTLR4 tool (Java-based, for grammar development)
 #   - All ClickHouse build dependencies
+#   - Stateless & Integration test dependencies (Docker, Minio, Redpanda, etc.)
 #
 # Usage:
 #   docker build -t graph-dev -f docs/graph/Dockerfile.dev .
 #   docker run -it -v $(pwd):/workspace/ClickHouse graph-dev
 #
 # Or use docker-compose (see docker-compose.graph.yml)
+
+FROM docker.redpanda.com/redpandadata/redpanda:v25.1.3 AS redpanda
 
 FROM ubuntu:22.04
 
@@ -86,11 +89,32 @@ RUN apt-get update \
         time \
         bzip2 \
         libmpfr6 \
+        binutils-dev \
+        expect \
+        bsdmainutils \
+        moreutils \
+        netcat-openbsd \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Linker symlink
-RUN ln -sf /usr/bin/lld-${LLVM_VERSION} /usr/bin/ld.lld
+# Install python dependencies required by ClickHouse builds and tests
+COPY ci/docker/integration/runner/requirements.txt /tmp/integration_reqs.txt
+COPY ci/docker/stateless-test/requirements.txt /tmp/stateless_reqs.txt
+RUN pip3 install --no-cache-dir -r /tmp/integration_reqs.txt -r /tmp/stateless_reqs.txt \
+    && pip3 install --no-cache-dir git+https://github.com/ClickHouse/kazoo.git \
+    && rm -f /tmp/*_reqs.txt
+# Linker and LLVM symlinks
+RUN ln -sf /usr/bin/lld-${LLVM_VERSION} /usr/bin/ld.lld \
+    && ln -sf /usr/bin/llvm-symbolizer-${LLVM_VERSION} /usr/bin/llvm-symbolizer \
+    && ln -sf /usr/bin/llvm-profdata-${LLVM_VERSION} /usr/bin/llvm-profdata \
+    && ln -sf /usr/bin/llvm-cov-${LLVM_VERSION} /usr/bin/llvm-cov
+
+# Install nfpm for building ClickHouse packages
+ARG NFPM_VERSION=2.41.2
+RUN arch=$(dpkg --print-architecture) \
+    && curl -Lo /tmp/nfpm.deb "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${arch}.deb" \
+    && dpkg -i /tmp/nfpm.deb \
+    && rm /tmp/nfpm.deb
 
 # ============================================================
 # Stage 2: ANTLR4 tool (for GQL grammar development)
@@ -143,11 +167,146 @@ RUN apt-get update \
         tmux \
         bash-completion \
         ripgrep \
+        procps \
+        sudo \
+        iproute2 \
+        btrfs-progs \
+        e2fsprogs \
+        iptables \
+        xfsprogs \
+        tar \
+        pigz \
+        wget \
+        git \
+        cgroupfs-mount \
+        tzdata \
+        libicu-dev \
+        bsdutils \
+        curl \
+        openssh-client \
+        liblua5.1-dev \
+        luajit \
+        libssl-dev \
+        libcurl4-openssl-dev \
+        default-jdk \
+        software-properties-common \
+        libkrb5-dev \
+        krb5-user \
+        g++ \
+        awscli \
+        brotli \
+        lz4 \
+        ncdu \
+        psmisc \
+        tree \
+        unzip \
+        parallel \
+        gnuplot \
+        imagemagick \
+        mysql-client \
+        postgresql-client \
+        sqlite3 \
+        qemu-user-static \
+        numactl \
+        dmidecode \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Install profiling tools: newer lcov, jeprof, FlameGraph
+RUN mkdir -p /tmp/lcov && cd /tmp/lcov \
+    && curl -L https://github.com/linux-test-project/lcov/releases/download/v2.4/lcov-2.4.tar.gz | tar xz --strip-components=1 \
+    && make install && cd / && rm -rf /tmp/lcov \
+    && curl -L -o /usr/bin/flamegraph.pl https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl \
+    && curl -L -o /usr/bin/difffolded.pl https://raw.githubusercontent.com/brendangregg/FlameGraph/master/difffolded.pl \
+    && chmod +x /usr/bin/flamegraph.pl /usr/bin/difffolded.pl \
+    && curl -L -o /usr/bin/jeprof https://raw.githubusercontent.com/jemalloc/jemalloc/master/bin/jeprof.in \
+    && sed -i -e "s/@jemalloc_version@/clickhouse/g" -e "s/@JEMALLOC_PREFIX@//g" /usr/bin/jeprof \
+    && chmod +x /usr/bin/jeprof
+
+# Install ODBC and Library bridges for testing external integrations
+RUN BRIDGE_VERSION='25.1.5.31' \
+    && arch=$(dpkg --print-architecture) \
+    && mkdir -p /tmp/bridges && cd /tmp/bridges \
+    && curl -O "https://packages.clickhouse.com/deb/pool/main/c/clickhouse/clickhouse-odbc-bridge_${BRIDGE_VERSION}_${arch}.deb" \
+    && curl -O "https://packages.clickhouse.com/deb/pool/main/c/clickhouse/clickhouse-library-bridge_${BRIDGE_VERSION}_${arch}.deb" \
+    && dpkg -i *.deb && cd / && rm -rf /tmp/bridges
+
+# Install Docker for integration testing support
+ENV DOCKER_CHANNEL stable
+RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add - \
+    && add-apt-repository "deb [arch=amd64,arm64] https://download.docker.com/linux/ubuntu $(lsb_release -c -s) ${DOCKER_CHANNEL}" \
+    && apt-get update \
+    && env DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+        docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN echo "clickhouse ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/clickhouse \
+    && chmod 0440 /etc/sudoers.d/clickhouse
+
+# Install sccache for fast compilation
+ARG SCCACHE_VERSION=v0.10.0
+ENV SCCACHE_IGNORE_SERVER_IO_ERROR=1
+RUN arch=$(uname -m) \
+    && if [ "$arch" = "x86_64" ]; then rarch=x86_64; \
+       elif [ "$arch" = "aarch64" ]; then rarch=aarch64; fi \
+    && curl -Ls "https://github.com/mozilla/sccache/releases/download/$SCCACHE_VERSION/sccache-$SCCACHE_VERSION-$rarch-unknown-linux-musl.tar.gz" | \
+       tar xz -C /tmp \
+    && mv "/tmp/sccache-$SCCACHE_VERSION-$rarch-unknown-linux-musl/sccache" /usr/bin \
+    && rm -rf "/tmp/sccache-$SCCACHE_VERSION-$rarch-unknown-linux-musl"
+
+# Install mold linker for fast linking
+ARG MOLD_VERSION=2.40.4
+RUN arch=$(uname -m) \
+    && if [ "$arch" = "x86_64" ]; then rarch=x86_64; \
+       elif [ "$arch" = "aarch64" ]; then rarch=aarch64; fi \
+    && curl -Lo /tmp/mold.tar.gz "https://github.com/rui314/mold/releases/download/v${MOLD_VERSION}/mold-${MOLD_VERSION}-${rarch}-linux.tar.gz" \
+    && mkdir /tmp/mold \
+    && tar -xzf /tmp/mold.tar.gz -C /tmp/mold \
+    && cp -r /tmp/mold/mold*/* /usr \
+    && rm -rf /tmp/mold /tmp/mold.tar.gz
+
 # ============================================================
-# Stage 5: User setup and workspace
+# Stage 5: Test Emulators (MinIO, Azurite, Redpanda)
+# ============================================================
+
+# Download Minio and Minio Client
+ARG MINIO_SERVER_VERSION=2025-06-13T11-33-47Z
+ARG MINIO_CLIENT_VERSION=2025-05-21T01-59-54Z
+RUN arch=$(uname -m) \
+    && if [ "$arch" = "x86_64" ]; then rarch=amd64; \
+       elif [ "$arch" = "aarch64" ]; then rarch=arm64; fi \
+    && curl -L "https://dl.min.io/server/minio/release/linux-${rarch}/archive/minio.RELEASE.${MINIO_SERVER_VERSION}" -o /usr/local/bin/minio \
+    && curl -L "https://dl.min.io/client/mc/release/linux-${rarch}/archive/mc.RELEASE.${MINIO_CLIENT_VERSION}" -o /usr/local/bin/mc \
+    && chmod +x /usr/local/bin/minio /usr/local/bin/mc
+
+# Download azurite-rs (Azure Blob Storage emulator in Rust)
+ARG AZURITE_RS_VERSION=v0.1.0-28a2afc
+RUN arch=$(uname -m) \
+    && if [ "$arch" = "x86_64" ]; then rarch=amd64; \
+       elif [ "$arch" = "aarch64" ]; then rarch=arm64; fi \
+    && curl -fsSL "https://github.com/ClickHouse/azurite-rs/releases/download/${AZURITE_RS_VERSION}/azurite-rs-linux-${rarch}.tar.gz" | tar -xz -C /usr/local/bin/ \
+    && mv /usr/local/bin/azurite-rs-linux-${rarch} /usr/local/bin/azurite-rs \
+    && chmod +x /usr/local/bin/azurite-rs
+
+# Install Redpanda (Kafka-compatible broker, no JVM required) from multistage build
+COPY --from=redpanda /opt/redpanda /opt/redpanda
+ENV PATH="/opt/redpanda/bin:${PATH}"
+
+# Install Spark and required packages for integration tests
+ENV SPARK_VERSION=3.5.5
+RUN curl -fsSL "https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop3.tgz" | tar xz -C / \
+    && mv /spark-${SPARK_VERSION}-bin-hadoop3 /spark
+ENV SPARK_HOME="/spark"
+ENV PATH="${SPARK_HOME}/bin:${PATH}"
+ENV JAVA_TOOL_OPTIONS="-Djdk.attach.allowAttachSelf=true"
+
+RUN packages="io.delta:delta-spark_2.12:3.1.0,org.apache.hudi:hudi-spark3.5-bundle_2.12:1.0.1,org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.262,org.apache.spark:spark-avro_2.12:3.5.1" \
+    && spark-shell --packages "$packages" </dev/null \
+    && find /root/.ivy2/ -name '*.jar' -exec ln -sf {} /spark/jars/ \;
+
+# ============================================================
+# Stage 6: User setup and workspace
 # ============================================================
 
 RUN groupadd --system --gid 1000 clickhouse \
@@ -165,6 +324,9 @@ ENV PYTHONUNBUFFERED=1
 # Convenience aliases
 RUN echo 'alias build-debug="cmake -S . -B build_debug -G Ninja -DCMAKE_BUILD_TYPE=Debug && ninja -C build_debug"' >> /root/.bashrc \
     && echo 'alias build-release="cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo && ninja -C build"' >> /root/.bashrc \
-    && echo 'alias antlr4-gql="antlr4 -Dlanguage=Cpp -visitor -no-listener -o /workspace/ClickHouse/contrib/gql-grammar/generated contrib/gql-grammar/GQL.g4"' >> /root/.bashrc
+    && echo 'alias antlr4-gql="antlr4 -Dlanguage=Cpp -visitor -no-listener -o /workspace/ClickHouse/contrib/gql-grammar/generated contrib/gql-grammar/GQL.g4"' >> /root/.bashrc \
+    && echo 'alias ll="ls -alF"' >> /root/.bashrc \
+    && echo 'alias ll="ls -alF"' >> /home/clickhouse/.bashrc \
+    && chown clickhouse:clickhouse /home/clickhouse/.bashrc
 
 CMD ["/bin/bash"]
