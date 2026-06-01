@@ -63,9 +63,9 @@ QueryPlan buildPlan(const std::string & query)
     return plan;
 }
 
-QueryPlan buildPlanWithAnalyzer(const std::string & query)
+QueryPlan buildPlanWithAnalyzer(const std::string & query, const SelectQueryOptions & options = {})
 {
-    InterpreterGQLQueryAnalyzer interpreter(parseGQL(query), getInterpreterContext());
+    InterpreterGQLQueryAnalyzer interpreter(parseGQL(query), getInterpreterContext(), options);
     QueryPlan plan;
     interpreter.buildQueryPlan(plan);
     return plan;
@@ -1510,6 +1510,31 @@ TEST(GQLQueryTreeAnalyzer, MatchFilterClauseBuildsFilterStep)
     const auto plan = buildPlanWithAnalyzer("MATCH (n) FILTER n = 1 RETURN n");
 
     EXPECT_EQ(linearStepNames(plan), (std::vector<String>{"Expression", "Filter", "GraphMatch"}));
+}
+
+TEST(GQLQueryTreeAnalyzer, RunOnlyResolveStillBuildsResolvedPlan)
+{
+    /// ignore_ast_optimizations routes through runOnlyResolve; resolution alone must still
+    /// produce a fully resolved, plannable tree.
+    const auto plan = buildPlanWithAnalyzer("MATCH (n) RETURN n + 1 AS m", SelectQueryOptions{}.ignoreASTOptimizations());
+
+    EXPECT_EQ(linearStepNames(plan), (std::vector<String>{"Expression", "GraphMatch"}));
+
+    const auto * root = plan.getRootNode();
+    ASSERT_NE(root, nullptr);
+    const auto & header = *root->step->getOutputHeader();
+    ASSERT_EQ(header.columns(), 1u);
+    EXPECT_EQ(header.getByPosition(0).name, "m");
+}
+
+TEST(GQLQueryTreeAnalyzer, GetSampleBlockReturnsHeaderWithoutExecuting)
+{
+    InterpreterGQLQueryAnalyzer interpreter(parseGQL("MATCH (n) RETURN n"), getInterpreterContext());
+
+    const auto header = interpreter.getSampleBlock();
+    ASSERT_NE(header, nullptr);
+    ASSERT_EQ(header->columns(), 1u);
+    EXPECT_EQ(header->getByPosition(0).name, "n");
 }
 
 #endif
