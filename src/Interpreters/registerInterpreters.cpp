@@ -6,6 +6,7 @@ void registerInterpreterSelectQuery(InterpreterFactory& factory);
 void registerInterpreterSelectQueryAnalyzer(InterpreterFactory& factory);
 void registerInterpreterSelectWithUnionQuery(InterpreterFactory& factory);
 void registerInterpreterSelectIntersectExceptQuery(InterpreterFactory& factory);
+void registerInterpreterGQLQuery(InterpreterFactory& factory);
 void registerInterpreterInsertQuery(InterpreterFactory& factory);
 void registerInterpreterCreateQuery(InterpreterFactory& factory);
 void registerInterpreterDropQuery(InterpreterFactory& factory);
@@ -71,6 +72,7 @@ void registerInterpreters() {
   registerInterpreterSelectQueryAnalyzer(factory);
   registerInterpreterSelectWithUnionQuery(factory);
   registerInterpreterSelectIntersectExceptQuery(factory);
+  registerInterpreterGQLQuery(factory);
   registerInterpreterInsertQuery(factory);
   registerInterpreterCreateQuery(factory);
   registerInterpreterDropQuery(factory);

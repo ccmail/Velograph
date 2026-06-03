@@ -43,6 +43,36 @@ enum class QueryTreeNodeType : uint8_t {
   CROSS_JOIN,
   JOIN,
   UNION,
+
+  // GQL query tree nodes. Entries follow the planned QueryTree shape and
+  // concrete node classes can be introduced incrementally.
+  GQL_LINEAR_QUERY,
+  GQL_COMBINED_QUERY,
+  GQL_SUBQUERY,
+  GQL_USE,
+  GQL_MATCH,
+  GQL_OPTIONAL_BLOCK,
+  GQL_PATH_PATTERN,
+  GQL_PATH_TERM,
+  GQL_PATH_ALTERNATION,
+  GQL_SIMPLIFIED_PATH_PATTERN,
+  GQL_SIMPLIFIED_PATH_EXPR,
+  GQL_NODE_PATTERN,
+  GQL_EDGE_PATTERN,
+  GQL_QUANTIFIER,
+  GQL_LABEL_EXPRESSION,
+  GQL_PROPERTY_MAP,
+  GQL_PROPERTY_ITEM,
+  GQL_KEEP,
+  GQL_YIELD,
+  GQL_FILTER,
+  GQL_RETURN,
+  GQL_ORDER_BY,
+  GQL_PAGE,
+  GQL_LET,
+  GQL_FOR,
+  GQL_CALL,
+  GQL_FINISH,
 };
 
 /// Convert query tree node type to string

@@ -2517,6 +2517,13 @@ ProjectionNames QueryAnalyzer::resolveExpressionNode(QueryTreeNodePtr &node, Ide
       throw Exception(ErrorCodes::LOGICAL_ERROR, "{} {} is not allowed in expression context. In scope {}", node->getNodeType(),
                       node->formatASTForErrorMessage(), scope.scope_node->formatASTForErrorMessage());
     }
+    default: {
+      throw Exception(
+          ErrorCodes::LOGICAL_ERROR,
+          "Node with type {} is not allowed in expression context. In scope {}",
+          node->getNodeTypeName(),
+          scope.scope_node->getNodeTypeName());
+    }
   }
 
   validateTreeSize(node, scope.context->getSettingsRef()[Setting::max_expanded_ast_elements], node_to_tree_size);

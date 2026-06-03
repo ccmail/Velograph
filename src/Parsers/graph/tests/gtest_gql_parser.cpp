@@ -587,13 +587,14 @@ TEST(GQLParser, FilterSearchConditionBuildsWhereClause) {
   ASSERT_NE(getMatchClause(*clauses, 0), nullptr);
   const auto* filter = clauses->clauses[1]->as<GAST::GQLWhereClause>();
   ASSERT_NE(filter, nullptr);
+  EXPECT_EQ(filter->type, GAST::GQLWhereClause::Type::Filter);
   ASSERT_NE(getExpr(filter->expression), nullptr);
   ASSERT_NE(getReturnClause(*clauses, 2), nullptr);
-  EXPECT_EQ(formatAST(*clauses), "MATCH (a) WHERE (a.age > 30) RETURN a");
-  assertNormalizedRoundTrip("MATCH (a) WHERE (a.age > 30) RETURN a");
+  EXPECT_EQ(formatAST(*clauses), "MATCH (a) FILTER (a.age > 30) RETURN a");
+  assertNormalizedRoundTrip("MATCH (a) FILTER (a.age > 30) RETURN a");
 }
 
-TEST(GQLParser, FilterWhereClauseNormalizesToWhere) {
+TEST(GQLParser, FilterWhereClausePreservesFilterType) {
   auto ast = parseGraphOrThrow("MATCH (a) FILTER WHERE a.age > 30 RETURN a");
   const auto* clauses = getClausesQuery(ast);
   ASSERT_NE(clauses, nullptr);
@@ -601,10 +602,11 @@ TEST(GQLParser, FilterWhereClauseNormalizesToWhere) {
   ASSERT_NE(getMatchClause(*clauses, 0), nullptr);
   const auto* filter = clauses->clauses[1]->as<GAST::GQLWhereClause>();
   ASSERT_NE(filter, nullptr);
+  EXPECT_EQ(filter->type, GAST::GQLWhereClause::Type::Filter);
   ASSERT_NE(getExpr(filter->expression), nullptr);
   ASSERT_NE(getReturnClause(*clauses, 2), nullptr);
-  EXPECT_EQ(formatAST(*clauses), "MATCH (a) WHERE (a.age > 30) RETURN a");
-  assertNormalizedRoundTrip("MATCH (a) WHERE (a.age > 30) RETURN a");
+  EXPECT_EQ(formatAST(*clauses), "MATCH (a) FILTER (a.age > 30) RETURN a");
+  assertNormalizedRoundTrip("MATCH (a) FILTER (a.age > 30) RETURN a");
 }
 
 TEST(GQLParser, FocusedUseWithFilter) {
@@ -616,8 +618,9 @@ TEST(GQLParser, FocusedUseWithFilter) {
   ASSERT_NE(getMatchClause(*clauses, 1), nullptr);
   const auto* filter = clauses->clauses[2]->as<GAST::GQLWhereClause>();
   ASSERT_NE(filter, nullptr);
+  EXPECT_EQ(filter->type, GAST::GQLWhereClause::Type::Filter);
   ASSERT_NE(getReturnClause(*clauses, 3), nullptr);
-  assertNormalizedRoundTrip("USE foo MATCH (a) WHERE (a IS NOT NULL) RETURN a");
+  assertNormalizedRoundTrip("USE foo MATCH (a) FILTER (a IS NOT NULL) RETURN a");
 }
 
 TEST(GQLParser, FilterExistsSubquery) {
@@ -628,6 +631,7 @@ TEST(GQLParser, FilterExistsSubquery) {
   ASSERT_NE(getMatchClause(*clauses, 0), nullptr);
   const auto* filter = clauses->clauses[1]->as<GAST::GQLWhereClause>();
   ASSERT_NE(filter, nullptr);
+  EXPECT_EQ(filter->type, GAST::GQLWhereClause::Type::Filter);
   const auto* exists = getExpr(filter->expression);
   ASSERT_NE(exists, nullptr);
   EXPECT_EQ(exists->kind, GAST::GQLExpr::Kind::UnaryOp);

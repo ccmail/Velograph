@@ -11,9 +11,10 @@ doc_type: 'reference'
 
 This document describes how the GQL (Graph Query Language, ISO/IEC 39075) parser is integrated into ClickHouse using ANTLR4.
 
-The current implementation is parser-only. It builds normalized ClickHouse
-`IAST` nodes for supported `GQL` syntax, but it does not execute graph queries
-yet.
+This document focuses on the parser. The parser builds normalized ClickHouse
+`IAST` nodes for supported `GQL` syntax; the interpreter layer now has an
+initial direct planner path for supported query roots, while graph storage and catalog
+execution remain separate follow-up work.
 
 ## ANTLR4 Integration
 
@@ -68,9 +69,9 @@ After changing `GQL.g4`, regenerate the parser sources with:
 See `src/Parsers/graph/grammar/README.md` for platform-specific generator
 notes.
 
-## Current Lowering-Facing Slice
+## Current Planner-Facing Slice
 
-The current implementation supports the parser-facing slice that is already stable enough for downstream lowering to consume without re-parsing source text:
+The current implementation supports the parser-facing slice that is already stable enough for downstream planner work to consume without re-parsing source text:
 
 ### Supported Statements
 
@@ -102,7 +103,7 @@ The current implementation supports the parser-facing slice that is already stab
 ### Deferred Features
 
 - `SESSION` / `START TRANSACTION` (session management)
-- binder, interpreter, storage, catalog execution, and query-plan lowering
+- binder, storage, catalog execution, and complete query planning
 - semantic validation for type compatibility and catalog references; the parser only builds syntactic `GQLTypeExpression` / `GQLGraphTypeSpecification` nodes
 - GQL text in ordinary ClickHouse sessions; production GQL parsing requires explicit `dialect = gql` / `query_language = gql`
 
@@ -114,7 +115,7 @@ The current refactor keeps the `antlr4` side and the `IAST` side intentionally s
 - The `IAST` layer is normalized in a `kgraph`-style shape, instead of mirroring every parse-tree wrapper rule.
 - Pure grammar pass-through nodes such as `compositeQueryStatement` are not preserved as dedicated AST wrappers.
 
-This keeps the visitor easy to debug against the grammar while still producing a stable AST contract for later lowering.
+This keeps the visitor easy to debug against the grammar while still producing a stable AST contract for later planner work.
 
 ### Query Root Contract
 
@@ -251,8 +252,8 @@ Under `dialect = gql` (equivalently `query_language = gql`), the top-level entry
 
 Known limitations of the current skeleton:
 
-- Distributed / remote-node queries (`HedgedConnections`, `MultiplexedConnections`) reset foreign dialects to `clickhouse` before forwarding, but do not propagate `gql` to remote shards. Distributed GQL execution is not a usable path until GQL-to-SQL lowering exists.
-- Interpreter / lowering is not yet wired: parsed GQL AST will enter `InterpreterFactory` but will fail with "unsupported" until lowering is implemented.
+- Distributed / remote-node queries (`HedgedConnections`, `MultiplexedConnections`) reset foreign dialects to `clickhouse` before forwarding, but do not propagate `gql` to remote shards. Distributed GQL execution is not a usable path until GQL-to-SQL rewrite exists.
+- Interpreter / planner is only partially wired: `GQLSingleQuery` and `GQLCombinedQuery` enter `InterpreterGQLQuery`, but unsupported clause, expression, catalog, storage, and distributed shapes still fail closed with explicit unsupported exceptions.
 - Client multi-statement splitting is not implemented for `Dialect::gql`: the current GQL driver expects the caller-provided span to contain one complete `gqlStatement`. Inputs with multiple statements are rejected by the grammar-level EOF wrapper rather than split by the ClickHouse SQL token driver.
 
 The current parser work therefore focuses on making:

@@ -9,8 +9,9 @@ doc_type: 'reference'
 
 # LeoGraph Roadmap
 
-This roadmap tracks the current parser-first development plan. It replaces the
-older milestone list that described the initial `ASTGraphQuery` prototype.
+This roadmap tracks the current `GQL` parser and interpreter planning work. It
+replaces the older milestone list that described the initial `ASTGraphQuery`
+prototype.
 
 ## Current Phase Summary
 
@@ -18,8 +19,8 @@ older milestone list that described the initial `ASTGraphQuery` prototype.
 P0: GQL parser / AST contract
     status: active and partially implemented
 
-P1: Interpreter / lowering MVP
-    status: next major phase
+P1: Interpreter / planner MVP
+    status: active and partially implemented
 
 P2: Graph catalog execution
     status: target design
@@ -31,9 +32,10 @@ P4: Multi-hop traversal and optimization
     status: future
 ```
 
-The current priority is still `GQL text -> normalized GQL IAST`. Runtime
-execution should consume typed AST nodes and fail closed for unsupported shapes;
-it should not parse `formatAST` output or infer semantics from raw source text.
+The current priority is the handoff from `GQL text -> normalized GQL IAST` into
+a reusable `GQL AST -> QueryPlan` framework. Runtime execution should consume
+typed AST nodes and fail closed for unsupported shapes; it should not parse
+`formatAST` output or infer semantics from raw source text.
 
 ## P0: GQL Parser and AST Contract
 
@@ -84,9 +86,9 @@ it should not parse `formatAST` output or infer semantics from raw source text.
   shapes.
 - Unsupported grammar branches fail explicitly with clear parser exceptions.
 
-## P1: Interpreter / Lowering MVP
+## P1: Interpreter / Planning MVP
 
-**Goal:** Lower a narrow, stable `GQL` query subset from typed AST nodes into a
+**Goal:** Plan a narrow, stable `GQL` query subset from typed AST nodes into a
 ClickHouse execution path.
 
 The recommended MVP boundary is:
@@ -104,7 +106,7 @@ Initial expression support should be whitelist-based:
 - numeric, string, boolean, and `NULL` literals;
 - arithmetic, comparison, and boolean operators;
 - basic aggregates such as `COUNT`, `SUM`, `MIN`, `MAX`, and `AVG`;
-- `CASE` and `CAST` only when the target lowering representation is explicit.
+- `CASE` and `CAST` only when the target planning representation is explicit.
 
 P1 should not include DML, catalog DDL execution, graph type DDL, full procedure
 calls, session commands, or speculative function mapping.
@@ -124,7 +126,7 @@ Target work:
 3. Store and load graph metadata.
 4. Add introspection paths for registered graphs, vertex mappings, and edge
    mappings.
-5. Connect catalog lookup to interpreter/lowering.
+5. Connect catalog lookup to interpreter/planner.
 
 [Graph Catalog and Table Mapping](catalog.md) describes the target model. It is a
 design document, not a statement of current runtime support.
@@ -136,7 +138,7 @@ expansion, destination lookup, and single-hop graph patterns.
 
 Target work:
 
-1. Design the first executable lowering for a single vertex scan.
+1. Design the first executable planning path for a single vertex scan.
 2. Add an execution path for one-hop outgoing and incoming edge expansion.
 3. Reuse ClickHouse filtering, projection, sorting, limiting, and aggregation
    steps where possible.
@@ -163,7 +165,7 @@ Target work:
 
 ## Deferred Standard Completeness
 
-These areas are intentionally deferred until the parser and first lowering path
+These areas are intentionally deferred until the parser and first planner path
 are stable:
 
 - Full `OpenGQL` `gqlProgram` support.
@@ -185,5 +187,7 @@ are stable:
 | Future integration tests | `tests/integration` | Multi-node catalog and execution behavior once graph runtime exists. |
 
 For parser-only smoke checks, use `clickhouse local` with
-`--allow_experimental_gql_dialect=1 --dialect=gql`. A supported parser input may
-still fail later with `UNKNOWN_TYPE_OF_QUERY` until the interpreter exists.
+`--allow_experimental_gql_dialect=1 --dialect=gql`. Supported
+`GQLSingleQuery` / `GQLCombinedQuery` inputs now enter `InterpreterGQLQuery`;
+unsupported runtime shapes should fail closed with explicit unsupported
+exceptions.

@@ -9,10 +9,10 @@ doc_type: 'reference'
 
 # LeoGraph Architecture
 
-LeoGraph is being developed in layers. The current implemented layer is the
-`GQL` parser and AST contract. Catalog execution, interpreter lowering, and
-graph-specific query-plan operators are target architecture, not current runtime
-behavior.
+LeoGraph is being developed in layers. The current implemented layers are the
+`GQL` parser / AST contract and an initial interpreter planner path for
+supported query roots. Catalog execution, storage-backed graph scans, and full
+graph-specific query-plan operators are still target architecture.
 
 ## Current Implementation: Parser and AST
 
@@ -37,9 +37,9 @@ Important properties of the current pipeline:
   `IParserBase` implementation.
 - The parser bypasses ClickHouse SQL token splitting and sends the complete
   caller-provided `GQL` span to ANTLR.
-- The parser currently validates and builds AST only. A successfully parsed
-  statement can still fail later with `UNKNOWN_TYPE_OF_QUERY` because no graph
-  interpreter is registered yet.
+- Supported `GQLSingleQuery` and `GQLCombinedQuery` roots now enter
+  `InterpreterGQLQuery`; unsupported runtime shapes still fail closed with
+  explicit unsupported exceptions.
 
 ## Source Layout
 
@@ -133,7 +133,7 @@ The future runtime layers are:
 
 | Layer | Target Responsibility | Current State |
 |-------|-----------------------|---------------|
-| Interpreter / analyzer | Resolve graph names, validate AST, bind graph variables, and choose lowering strategy. | Not implemented. |
+| Interpreter / analyzer | Resolve graph names, validate AST, bind graph variables, and choose planning strategy. | Not implemented. |
 | Graph catalog | Store property graph definitions and map labels / properties to ClickHouse tables and columns. | Design only. |
 | Query-plan operators | Represent scans, expand steps, multi-hop traversal, and vertex lookup. | Design only. |
 | Pipeline processors | Execute expand and lookup operations while reusing ClickHouse processors where possible. | Design only. |

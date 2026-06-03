@@ -8,6 +8,7 @@ class GQLWhereClause final : public DB::IAST {
  public:
   enum class Type : UInt8 {
     Where,
+    Filter,
     Having,
   };
 
@@ -38,7 +39,13 @@ class GQLWhereClause final : public DB::IAST {
 
  protected:
   void formatImpl(WriteBuffer &ostr, const FormatSettings &settings, FormatState &state, FormatStateStacked frame) const override {
-    ostr << (type == Type::Having ? "HAVING " : "WHERE ");
+    if (type == Type::Having) {
+      ostr << "HAVING ";
+    } else if (type == Type::Filter) {
+      ostr << "FILTER ";
+    } else {
+      ostr << "WHERE ";
+    }
 
     if (expression) expression->format(ostr, settings, state, frame);
   }

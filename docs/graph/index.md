@@ -14,9 +14,11 @@ ClickHouse. It aims to support standard `GQL` over data stored in ordinary
 ClickHouse tables, while reusing ClickHouse's `MergeTree` storage, vectorized
 execution, distributed query infrastructure, settings, and resource tracking.
 
-The project is currently in a parser-first phase. The main working surface is
-`GQL text -> normalized GQL IAST`. Runtime interpretation, graph catalog
-execution, and graph-specific query-plan operators are still future work.
+The project is currently transitioning from parser-first work into the first
+interpreter / planner path. The main stable contract is still `GQL text ->
+normalized GQL IAST`, and supported query roots now enter an initial
+`InterpreterGQLQuery` / `GQL::GQLPlanBuilder` direct planner path. Graph catalog
+execution and real graph storage integration are still future work.
 
 ## Goals
 
@@ -25,7 +27,7 @@ execution, and graph-specific query-plan operators are still future work.
 - Parse standard `GQL` with an ANTLR4-based parser derived from the OpenGQL
   grammar.
 - Build an explicit, ClickHouse-native `GQL*` AST that later interpreter and
-  lowering code can consume without reparsing source text.
+  planner code can consume without reparsing source text.
 - Target analytical graph workloads such as pattern matching, multi-hop
   traversal, graph-shaped aggregations, and graph algorithms.
 
@@ -46,9 +48,9 @@ execution, and graph-specific query-plan operators are still future work.
 | AST layer | Active | Graph nodes live under `src/Parsers/graph/AST` and inherit from `IAST` or `ASTWithAlias`. |
 | Visitor | Active | `GQLParseTreeVisitor` is split by query, projection, pattern, expression, DML, DDL, and type handling. |
 | Parser tests | Active | Contract tests live in `src/Parsers/graph/tests/gtest_gql_parser.cpp`. |
-| Interpreter / lowering | Not implemented | First boundary is tracked in `gql_ast_interpreter_todo.md`. |
+| Interpreter / planner | Active MVP | `GQLSingleQuery` and `GQLCombinedQuery` enter `InterpreterGQLQuery`; reusable helpers under `src/Interpreters/GQL` plan supported source and post-source clauses while unsupported shapes fail closed. |
 | Graph catalog execution | Design only | `catalog.md` describes the target table-mapping model. |
-| Graph operators | Design only | `operators.md` describes the target expand-based execution model. |
+| Graph operators | Initial boundary | `Graph::MatchStep` and `Graph::MatchSource` define the current source contract; real expand / traversal operators remain design work. |
 
 ## Parser-Only Contract
 
@@ -78,7 +80,8 @@ changes the interpreter contract.
 | Document | Use It For |
 |----------|------------|
 | [GQL parser design](parser.md) | Current parser architecture, AST contract, supported syntax, and dispatch rules. |
-| [Interpreter readiness checklist](gql_ast_interpreter_todo.md) | Stable AST surface and fail-closed rules for future lowering work. |
+| [Interpreter readiness checklist](gql_ast_interpreter_todo.md) | Stable AST surface and fail-closed rules for future planner work. |
+| [GQL runtime flow](gql_runtime_flow.md) | Code-reading guide from `executeQuery` through parser, runtime flow, current planner mapping, `MatchStep`, and `MatchSource`. |
 | [Architecture](architecture.md) | Current implementation layers and target runtime architecture. |
 | [Roadmap](roadmap.md) | Milestones, current parser work, and next implementation slices. |
 | [Graph catalog design](catalog.md) | Future property graph catalog and table mapping model. |

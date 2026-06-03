@@ -56,6 +56,60 @@ const char *toString(QueryTreeNodeType type) {
       return "JOIN";
     case QueryTreeNodeType::UNION:
       return "UNION";
+    case QueryTreeNodeType::GQL_LINEAR_QUERY:
+      return "GQL_LINEAR_QUERY";
+    case QueryTreeNodeType::GQL_COMBINED_QUERY:
+      return "GQL_COMBINED_QUERY";
+    case QueryTreeNodeType::GQL_SUBQUERY:
+      return "GQL_SUBQUERY";
+    case QueryTreeNodeType::GQL_USE:
+      return "GQL_USE";
+    case QueryTreeNodeType::GQL_MATCH:
+      return "GQL_MATCH";
+    case QueryTreeNodeType::GQL_OPTIONAL_BLOCK:
+      return "GQL_OPTIONAL_BLOCK";
+    case QueryTreeNodeType::GQL_PATH_PATTERN:
+      return "GQL_PATH_PATTERN";
+    case QueryTreeNodeType::GQL_PATH_TERM:
+      return "GQL_PATH_TERM";
+    case QueryTreeNodeType::GQL_PATH_ALTERNATION:
+      return "GQL_PATH_ALTERNATION";
+    case QueryTreeNodeType::GQL_SIMPLIFIED_PATH_PATTERN:
+      return "GQL_SIMPLIFIED_PATH_PATTERN";
+    case QueryTreeNodeType::GQL_SIMPLIFIED_PATH_EXPR:
+      return "GQL_SIMPLIFIED_PATH_EXPR";
+    case QueryTreeNodeType::GQL_NODE_PATTERN:
+      return "GQL_NODE_PATTERN";
+    case QueryTreeNodeType::GQL_EDGE_PATTERN:
+      return "GQL_EDGE_PATTERN";
+    case QueryTreeNodeType::GQL_QUANTIFIER:
+      return "GQL_QUANTIFIER";
+    case QueryTreeNodeType::GQL_LABEL_EXPRESSION:
+      return "GQL_LABEL_EXPRESSION";
+    case QueryTreeNodeType::GQL_PROPERTY_MAP:
+      return "GQL_PROPERTY_MAP";
+    case QueryTreeNodeType::GQL_PROPERTY_ITEM:
+      return "GQL_PROPERTY_ITEM";
+    case QueryTreeNodeType::GQL_KEEP:
+      return "GQL_KEEP";
+    case QueryTreeNodeType::GQL_YIELD:
+      return "GQL_YIELD";
+    case QueryTreeNodeType::GQL_FILTER:
+      return "GQL_FILTER";
+    case QueryTreeNodeType::GQL_RETURN:
+      return "GQL_RETURN";
+    case QueryTreeNodeType::GQL_ORDER_BY:
+      return "GQL_ORDER_BY";
+    case QueryTreeNodeType::GQL_PAGE:
+      return "GQL_PAGE";
+    case QueryTreeNodeType::GQL_LET:
+      return "GQL_LET";
+    case QueryTreeNodeType::GQL_FOR:
+      return "GQL_FOR";
+    case QueryTreeNodeType::GQL_CALL:
+      return "GQL_CALL";
+    case QueryTreeNodeType::GQL_FINISH:
+      return "GQL_FINISH";
   }
 }
 
