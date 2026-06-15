@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Interpreters/Context_fwd.h>
+#include <Interpreters/IInterpreter.h>
 #include <Interpreters/SelectQueryOptions.h>
 #include <Parsers/IAST_fwd.h>
 #include <Analyzer/IQueryTreeNode.h>
@@ -21,7 +22,7 @@ class QueryPlan;
   * 3. QueryTree -> QueryPlan (GQLPlanner)
   * 4. QueryPlan -> QueryPipeline -> execution
   */
-class InterpreterGQLQueryAnalyzer
+class InterpreterGQLQueryAnalyzer final : public IInterpreter
 {
 public:
     /** Construct from Parser AST: build the QueryTree and run analysis passes. */
@@ -33,7 +34,7 @@ public:
         const QueryTreeNodePtr & query_tree_, const ContextPtr & context_, const SelectQueryOptions & select_query_options_ = {});
 
     /** Execute the query and return the result pipeline. */
-    BlockIO execute();
+    BlockIO execute() override;
 
     /** Build the QueryPlan and return its output header without executing the pipeline. */
     SharedHeader getSampleBlock();
