@@ -37,17 +37,11 @@ QueryTreeNodePtr GQLFilterNode::cloneImpl() const { return std::make_shared<GQLF
 ASTPtr GQLFilterNode::toASTImpl(const ConvertToASTOptions & options) const {
   namespace GAST = DB::OPENGQL::AST;
 
-  auto where_clause = make_intrusive<GAST::GQLWhereClause>();
-
-  // Convert predicate expression
-  if (children[predicate_child_index]) {
-    where_clause->predicate = children[predicate_child_index]->toAST(options);
-    where_clause->children.push_back(where_clause->predicate);
-  } else {
+  if (!children[predicate_child_index])
     throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL WHERE clause has no predicate");
-  }
 
-  return where_clause;
+  auto predicate_ast = children[predicate_child_index]->toAST(options);
+  return make_intrusive<GAST::GQLWhereClause>(predicate_ast);
 }
 
 }

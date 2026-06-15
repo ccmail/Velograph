@@ -48,13 +48,4 @@ void InterpreterGQLQuery::buildQueryPlan(QueryPlan & query_plan)
     query_plan.addInterpreterContext(getContext());
 }
 
-void registerInterpreterGQLQuery(InterpreterFactory & factory)
-{
-    auto create_fn = [](const InterpreterFactory::Arguments & args)
-    {
-        return std::make_unique<InterpreterGQLQuery>(args.query, args.context);
-    };
-    factory.registerInterpreter("InterpreterGQLQuery", create_fn);
-}
-
 }

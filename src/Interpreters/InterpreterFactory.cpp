@@ -137,7 +137,7 @@ InterpreterFactory::InterpreterPtr InterpreterFactory::get(ASTPtr& query, Contex
   } else if (query->as<ASTSelectIntersectExceptQuery>()) {
     interpreter_name = "InterpreterSelectIntersectExceptQuery";
   } else if (query->as<OPENGQL::AST::GQLSingleQuery>() || query->as<OPENGQL::AST::GQLCombinedQuery>()) {
-    interpreter_name = "InterpreterGQLQuery";
+    interpreter_name = "InterpreterGQLQueryAnalyzer";
   } else if (query->as<ASTInsertQuery>()) {
     ProfileEvents::increment(ProfileEvents::InsertQuery);
     bool allow_materialized = static_cast<bool>(context->getSettingsRef()[Setting::insert_allow_materialized_columns]);
