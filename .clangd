@@ -1,3 +1,12 @@
+CompilationDatabase: build
+CompileFlags:
+    Add:
+        - -Isrc
+        - -Ibuild/src
+        - -Ibase/base/..
+        - -Ibuild/base/base/..
+        - -Ibase/pcg-random/.
+        - -Isrc/Common/mysqlxx/.
 Diagnostics:
     # clangd does parse .clang-tidy, but some checks are too slow to run in
     # clang-tidy build, so let's enable them explicitly for clangd at least.
