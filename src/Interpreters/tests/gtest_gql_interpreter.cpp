@@ -12,6 +12,7 @@
 #  include <Interpreters/GQL/ClausePlanner.h>
 #  include <Interpreters/GQL/ExpressionPlanner.h>
 #  include <Interpreters/GQL/GQLPlanBuilder.h>
+#  include <Interpreters/GQL/GQLQueryOptions.h>
 #  include <Interpreters/InterpreterGQLQuery.h>
 #  include <Interpreters/InterpreterGQLQueryAnalyzer.h>
 #  include <Parsers/ASTFunction.h>
@@ -63,12 +64,10 @@ QueryPlan buildPlan(const std::string & query)
     return plan;
 }
 
-QueryPlan buildPlanWithAnalyzer(const std::string & query, const SelectQueryOptions & options = {})
+QueryPlan buildPlanWithAnalyzer(const std::string & query, const GQLQueryOptions & options = {})
 {
     InterpreterGQLQueryAnalyzer interpreter(parseGQL(query), getInterpreterContext(), options);
-    QueryPlan plan;
-    interpreter.buildQueryPlan(plan);
-    return plan;
+    return std::move(interpreter).extractQueryPlan();
 }
 
 QueryPlan buildPlanWithGQLPlanBuilder(const std::string & query)
@@ -1516,7 +1515,7 @@ TEST(GQLQueryTreeAnalyzer, RunOnlyResolveStillBuildsResolvedPlan)
 {
     /// ignore_ast_optimizations routes through runOnlyResolve; resolution alone must still
     /// produce a fully resolved, plannable tree.
-    const auto plan = buildPlanWithAnalyzer("MATCH (n) RETURN n + 1 AS m", SelectQueryOptions{}.ignoreASTOptimizations());
+    const auto plan = buildPlanWithAnalyzer("MATCH (n) RETURN n + 1 AS m", GQLQueryOptions{}.ignoreASTOptimizations());
 
     EXPECT_EQ(linearStepNames(plan), (std::vector<String>{"Expression", "GraphMatch"}));
 

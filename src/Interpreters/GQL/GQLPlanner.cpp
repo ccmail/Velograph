@@ -687,6 +687,64 @@ void buildGQLQueryPlan(
     buildGQLQueryPlanFromTree(query_plan, query_tree, std::move(context), scope);
 }
 
+Planner::Planner(const QueryTreeNodePtr & query_tree_, const ContextPtr & context_, const GQLQueryOptions & options_)
+    : query_tree(query_tree_)
+    , context(context_)
+    , options(options_)
+{
+}
+
+Planner::Planner(const QueryTreeNodePtr & query_tree_, const ContextPtr & context_, const GQLQueryOptions & options_,
+                 PlanScope & initial_scope_)
+    : query_tree(query_tree_)
+    , context(context_)
+    , options(options_)
+    , plan_scope(initial_scope_)
+{
+}
+
+void Planner::addStorageLimits(const StorageLimitsList & limits)
+{
+    storage_limits.insert(storage_limits.end(), limits.begin(), limits.end());
+}
+
+void Planner::buildPlanForLinearQueryNode()
+{
+    const auto * linear = query_tree->as<GQLLinearQueryNode>();
+    if (!linear)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL query tree is not a linear query");
+
+    planLinearQueryFromTree(query_plan, *linear, context, plan_scope);
+}
+
+void Planner::buildPlanForCombinedQueryNode()
+{
+    const auto * combined = query_tree->as<GQLCombinedQueryNode>();
+    if (!combined)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL query tree is not a combined query");
+
+    planCombinedQueryFromTree(query_plan, *combined, context);
+}
+
+void Planner::buildQueryPlanIfNeeded()
+{
+    if (query_plan_built)
+        return;
+
+    if (!query_tree)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL QueryTree is null");
+
+    if (query_tree->as<GQLLinearQueryNode>())
+        buildPlanForLinearQueryNode();
+    else if (query_tree->as<GQLCombinedQueryNode>())
+        buildPlanForCombinedQueryNode();
+    else
+        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "GQL planner does not yet support this query root");
+
+    query_plan.addInterpreterContext(context);
+    query_plan_built = true;
+}
+
 }
 
 }
