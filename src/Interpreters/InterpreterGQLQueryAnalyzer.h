@@ -50,6 +50,11 @@ class InterpreterGQLQueryAnalyzer final : public IInterpreter {
    */
   QueryPlan&& extractQueryPlan() &&;
 
+  /** Build the QueryPipeline from the internally cached plan.
+   * Mirrors InterpreterSelectQueryAnalyzer::buildQueryPipeline().
+   */
+  QueryPipelineBuilder buildQueryPipeline();
+
   bool ignoreQuota() const override { return gql_query_options.ignore_quota; }
   bool ignoreLimits() const override { return gql_query_options.ignore_limits; }
 

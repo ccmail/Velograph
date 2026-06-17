@@ -734,12 +734,18 @@ void Planner::buildQueryPlanIfNeeded()
     if (!query_tree)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL QueryTree is null");
 
-    if (query_tree->as<GQLLinearQueryNode>())
-        buildPlanForLinearQueryNode();
-    else if (query_tree->as<GQLCombinedQueryNode>())
-        buildPlanForCombinedQueryNode();
-    else
-        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "GQL planner does not yet support this query root");
+    switch (query_tree->getNodeType())
+    {
+        case QueryTreeNodeType::GQL_LINEAR_QUERY:
+            buildPlanForLinearQueryNode();
+            break;
+        case QueryTreeNodeType::GQL_COMBINED_QUERY:
+            buildPlanForCombinedQueryNode();
+            break;
+        default:
+            throw Exception(ErrorCodes::NOT_IMPLEMENTED, "GQL planner does not yet support query tree node type: {}",
+                            query_tree->getNodeType());
+    }
 
     query_plan.addInterpreterContext(context);
     query_plan_built = true;
