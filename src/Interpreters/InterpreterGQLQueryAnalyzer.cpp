@@ -2,6 +2,7 @@
 #include <Analyzer/GQL/Passes/GQLQueryTreePassManager.h>
 #include <Common/Exception.h>
 #include <Core/Block.h>
+#include <Core/Settings.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <Interpreters/ActionsDAG.h>
 #include <Interpreters/ClientInfo.h>
@@ -20,6 +21,10 @@ namespace DB {
 
 namespace ErrorCodes {
 extern const int LOGICAL_ERROR;
+}
+
+namespace Setting {
+extern const SettingsBool use_concurrency_control;
 }
 
 namespace {
@@ -81,19 +86,25 @@ InterpreterGQLQueryAnalyzer::InterpreterGQLQueryAnalyzer(const QueryTreeNodePtr&
 }
 
 BlockIO InterpreterGQLQueryAnalyzer::execute() {
+  auto pipeline_builder = buildQueryPipeline();
+
+  BlockIO result;
+  result.pipeline = QueryPipelineBuilder::getPipeline(std::move(pipeline_builder));
+
+  if (!gql_query_options.ignore_quota) result.pipeline.setQuota(context->getQuota());
+
+  return result;
+}
+
+QueryPipelineBuilder InterpreterGQLQueryAnalyzer::buildQueryPipeline() {
   auto& plan = getQueryPlan();
 
   QueryPlanOptimizationSettings optimization_settings(context);
   BuildQueryPipelineSettings build_pipeline_settings(context);
 
-  auto builder = plan.buildQueryPipeline(optimization_settings, build_pipeline_settings);
+  plan.setConcurrencyControl(context->getSettingsRef()[Setting::use_concurrency_control]);
 
-  BlockIO result;
-  result.pipeline = QueryPipelineBuilder::getPipeline(std::move(*builder));
-
-  if (!gql_query_options.ignore_quota) result.pipeline.setQuota(context->getQuota());
-
-  return result;
+  return std::move(*plan.buildQueryPipeline(optimization_settings, build_pipeline_settings));
 }
 
 QueryPlan& InterpreterGQLQueryAnalyzer::getQueryPlan() {
