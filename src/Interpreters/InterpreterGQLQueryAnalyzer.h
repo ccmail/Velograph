@@ -63,16 +63,22 @@ class InterpreterGQLQueryAnalyzer final : public IInterpreter {
   QueryTreeNodePtr query_tree;
   GQL::Planner planner;
 
-  /** Parallel-replicas optimization builder.
+  /** TODO: enable parallel-replicas optimization for GQL.
    *
-   * Currently commented out because GQL distributed execution / parallel replicas
-   * support is not ready. The SQL analyzer uses this to generate an alternative plan
-   * that reads from multiple replicas in parallel and then picks the cheaper plan.
+   * The SQL analyzer (InterpreterSelectQueryAnalyzer) builds a parallel-replicas
+   * QueryPlan via this lazy builder and lets the optimizer pick it when cheaper.
    *
-   * GQL MATCH queries read graph data; once they are backed by sharded MergeTree
-   * tables and GQL::Planner can produce a standard QueryPlan that the optimizer
-   * understands, this optimization can be enabled by mirroring
-   * InterpreterSelectQueryAnalyzer::query_plan_with_parallel_replicas_builder.
+   * To enable it for GQL, after graph data is backed by sharded MergeTree tables:
+   *
+   *   1. Uncomment the member below and add these includes to the .cpp:
+   *        #include <functional>
+   *        #include <memory>
+   *   2. Implement buildGQLQueryPlanForAutomaticParallelReplicas() mirroring
+   *      InterpreterSelectQueryAnalyzer.cpp:117.
+   *   3. Wire it into execute() / buildQueryPipeline():
+   *        optimization_settings.query_plan_with_parallel_replicas_builder
+   *            = query_plan_with_parallel_replicas_builder;
+   *      (see InterpreterSelectQueryAnalyzer.cpp:289-290)
    *
    * std::function<std::unique_ptr<QueryPlan>()> query_plan_with_parallel_replicas_builder;
    */
