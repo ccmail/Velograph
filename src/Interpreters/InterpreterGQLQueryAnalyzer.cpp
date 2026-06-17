@@ -28,13 +28,11 @@ ContextMutablePtr buildContext(const ContextPtr& context, const GQLQueryOptions&
   auto result_context = Context::createCopy(context);
 
   if (gql_query_options.shard_num)
-    result_context->addSpecialScalar(
-        "_shard_num",
-        Block{{DataTypeUInt32().createColumnConst(1, *gql_query_options.shard_num), std::make_shared<DataTypeUInt32>(), "_shard_num"}});
+    result_context->addSpecialScalar("_shard_num", Block{{DataTypeUInt32().createColumnConst(1, *gql_query_options.shard_num),
+                                                          std::make_shared<DataTypeUInt32>(), "_shard_num"}});
   if (gql_query_options.shard_count)
-    result_context->addSpecialScalar(
-        "_shard_count",
-        Block{{DataTypeUInt32().createColumnConst(1, *gql_query_options.shard_count), std::make_shared<DataTypeUInt32>(), "_shard_count"}});
+    result_context->addSpecialScalar("_shard_count", Block{{DataTypeUInt32().createColumnConst(1, *gql_query_options.shard_count),
+                                                            std::make_shared<DataTypeUInt32>(), "_shard_count"}});
 
   return result_context;
 }
@@ -43,10 +41,8 @@ ContextMutablePtr buildContext(const ContextPtr& context, const GQLQueryOptions&
  *
  * This is analogous to buildQueryTreeAndRunPasses() for SQL queries.
  */
-QueryTreeNodePtr buildGQLQueryTreeAndRunPasses(const ASTPtr& query, const GQLQueryOptions& gql_query_options,
-                                               const ContextPtr& context) {
-  if (!query)
-    throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL query AST is null");
+QueryTreeNodePtr buildGQLQueryTreeAndRunPasses(const ASTPtr& query, const GQLQueryOptions& gql_query_options, const ContextPtr& context) {
+  if (!query) throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL query AST is null");
 
   auto query_tree = GQL::buildGQLQueryTree(*query, context);
 
@@ -81,8 +77,7 @@ InterpreterGQLQueryAnalyzer::InterpreterGQLQueryAnalyzer(const QueryTreeNodePtr&
       gql_query_options(gql_query_options_),
       query_tree(query_tree_),
       planner(query_tree, context, gql_query_options) {
-  if (!query_tree)
-    throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL QueryTree is null");
+  if (!query_tree) throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL QueryTree is null");
 }
 
 BlockIO InterpreterGQLQueryAnalyzer::execute() {
@@ -96,8 +91,7 @@ BlockIO InterpreterGQLQueryAnalyzer::execute() {
   BlockIO result;
   result.pipeline = QueryPipelineBuilder::getPipeline(std::move(*builder));
 
-  if (!gql_query_options.ignore_quota)
-    result.pipeline.setQuota(context->getQuota());
+  if (!gql_query_options.ignore_quota) result.pipeline.setQuota(context->getQuota());
 
   return result;
 }
@@ -112,9 +106,7 @@ QueryPlan&& InterpreterGQLQueryAnalyzer::extractQueryPlan() && {
   return std::move(planner).extractQueryPlan();
 }
 
-SharedHeader InterpreterGQLQueryAnalyzer::getSampleBlock() {
-  return getQueryPlan().getCurrentHeader();
-}
+SharedHeader InterpreterGQLQueryAnalyzer::getSampleBlock() { return getQueryPlan().getCurrentHeader(); }
 
 void registerInterpreterGQLQueryAnalyzer(InterpreterFactory& factory) {
   auto create_fn = [](const InterpreterFactory::Arguments& args) {
@@ -125,8 +117,7 @@ void registerInterpreterGQLQueryAnalyzer(InterpreterFactory& factory) {
     gql_options.ignore_ast_optimizations = args.options.ignore_ast_optimizations;
     gql_options.is_internal = args.options.is_internal;
     gql_options.is_explain = args.options.is_explain;
-    if (args.options.shard_num && args.options.shard_count)
-      gql_options.setShardInfo(*args.options.shard_num, *args.options.shard_count);
+    if (args.options.shard_num && args.options.shard_count) gql_options.setShardInfo(*args.options.shard_num, *args.options.shard_count);
 
     return std::make_unique<InterpreterGQLQueryAnalyzer>(args.query, args.context, gql_options);
   };
