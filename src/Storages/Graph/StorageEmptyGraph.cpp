@@ -6,15 +6,15 @@
 namespace DB
 {
 
-Pipe StorageEmptyGraph::readGraphMatch(
-    const Graph::MatchSpec & match_spec,
+Pipe StorageEmptyGraph::scan(
     const SharedHeader & header,
-    ContextPtr /*context*/,
+    const IColumn::Filter & /*header_filter*/,
+    GraphElementKind /*kind*/,
     size_t /*max_block_size*/,
     size_t /*num_streams*/)
 {
-    /// No graph data is wired up yet: emit zero rows for the requested pattern.
-    return Pipe(std::make_shared<Graph::MatchSource>(header, match_spec));
+    /// No graph data is wired up yet: emit zero rows for the requested element kind.
+    return Pipe(std::make_shared<Graph::MatchSource>(header, Graph::MatchSpec{}));
 }
 
 }

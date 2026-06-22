@@ -7,9 +7,10 @@ namespace DB
 
 /** Fail-closed placeholder graph storage.
   *
-  * Produces no rows for any `MATCH`, and inherits the fail-closed `IStorage::write`.
-  * It exists so the graph source/storage contract is concrete, instantiable, and
-  * testable before a real graph storage engine is implemented.
+  * Produces no rows for any graph primitive, and inherits the fail-closed
+  * `IStorage::write`. It exists so the graph source/storage contract is
+  * concrete, instantiable, and testable before a real graph storage engine is
+  * implemented.
   */
 class StorageEmptyGraph final : public IGraphStorage
 {
@@ -18,10 +19,10 @@ public:
 
     std::string getName() const override { return "EmptyGraph"; }
 
-    Pipe readGraphMatch(
-        const Graph::MatchSpec & match_spec,
+    Pipe scan(
         const SharedHeader & header,
-        ContextPtr context,
+        const IColumn::Filter & header_filter,
+        GraphElementKind kind,
         size_t max_block_size,
         size_t num_streams) override;
 };

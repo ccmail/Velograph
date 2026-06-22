@@ -240,10 +240,27 @@ void MatchStep::initializePipeline(QueryPipelineBuilder & pipeline, const BuildQ
 {
     if (graph_storage)
     {
-        /// TODO: derive max_block_size / num_streams from context settings and query
-        /// info once a real graph reader consumes them.
-        pipeline.init(graph_storage->readGraphMatch(match_spec, getOutputHeader(), context, DEFAULT_BLOCK_SIZE, 1));
-        return;
+        /// TODO(graph-storage): lower the full `MatchSpec` into a left-deep pipeline
+        /// of `scan` / `getVertex` / `getNeighbors` primitives. Variable-length paths
+        /// (`pathExpand`) are decomposed by the query engine into repeated primitive
+        /// operations, not pushed down as a single storage primitive.
+        ///
+        /// For now, start the plan with a vertex scan of the first node of the first
+        /// path; the remaining nodes and edges will be joined by `getVertex` /
+        /// `getNeighbors` once the execution model is wired up.
+        const auto & paths = match_spec.paths;
+        if (!paths.empty() && !paths.front().nodes.empty())
+        {
+            const auto & first_node = paths.front().nodes.front();
+            (void)first_node;
+            pipeline.init(graph_storage->scan(
+                getOutputHeader(),
+                {},
+                DB::GraphElementKind::Vertex,
+                DEFAULT_BLOCK_SIZE,
+                1));
+            return;
+        }
     }
 
     pipeline.init(Pipe(std::make_shared<MatchSource>(getOutputHeader(), match_spec)));
