@@ -2,6 +2,7 @@
 
 #include <Columns/ColumnsNumber.h>
 #include <Core/Defines.h>
+#include <Core/Names.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <Parsers/IAST.h>
 #include <Processors/Sources/Graph/MatchSource.h>
@@ -253,9 +254,17 @@ void MatchStep::initializePipeline(QueryPipelineBuilder & pipeline, const BuildQ
         {
             const auto & first_node = paths.front().nodes.front();
             (void)first_node;
+            /// Use the Stage-1 (NameSet) overload so the storage builds the column
+            /// mask from the projection column names itself. This keeps `MatchStep`
+            /// agnostic of how the internal table header is laid out.
+            const auto & output_header = getOutputHeader();
+            NameSet projection_columns;
+            projection_columns.reserve(output_header->columns());
+            for (const auto & col : *output_header)
+                projection_columns.insert(col.name);
+
             pipeline.init(graph_storage->scan(
-                getOutputHeader(),
-                {},
+                projection_columns,
                 DB::GraphElementKind::Vertex,
                 DEFAULT_BLOCK_SIZE,
                 1));

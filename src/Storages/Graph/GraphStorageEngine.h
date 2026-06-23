@@ -14,7 +14,7 @@ namespace DB
 
 class Pipe;
 class QueryPlan;
-class StorageID;
+struct StorageID;
 
 /** Graph storage engine backed by MergeTree.
   *
@@ -32,7 +32,7 @@ class StorageID;
   * As an `IGraphStorage` it is registered in `DatabaseCatalog` under the graph
   * database name and resolved by `resolveGraphStorage`; `IStorage::read` stays
   * fail-closed, while graph reads go through the traversal primitives
-  * (`scan`, `getVertex`, `getNeighbors`).
+  * (`scan`, `getVertex`, `getEdge`, `getNeighbors`).
   */
 class GraphStorageEngine : public IGraphStorage
 {
@@ -58,12 +58,8 @@ public:
 
     /// TODO(graph-storage): back the traversal primitives by the internal tables.
     /// They stay fail-closed (inherited from `IGraphStorage`) until implemented.
-    Pipe scan(
-        const SharedHeader & header,
-        const IColumn::Filter & header_filter,
-        GraphElementKind kind,
-        size_t max_block_size,
-        size_t num_streams) override;
+    /// The `xxxImpl` overrides here only need to be declared once concrete
+    /// MergeTree key-condition pushdown is wired in.
 
     /// --- Schema management ---
 
@@ -89,23 +85,6 @@ public:
     /// The reverse table write swaps __SRC__ / __DST__ ordering.
     void writeEdge(const Block & block);
 
-    /// --- Read operations (low-level, used to back the primitives above) ---
-
-    /// Read forward edges for a given source vertex and optional edge type.
-    /// Returns a Pipe that streams the matching rows.
-    /// If `edge_type` is empty, all edge types are returned.
-    Pipe readForwardEdges(UInt64 src, const String & edge_type, ContextPtr context) const;
-
-    /// Read reverse edges for a given destination vertex.
-    Pipe readReverseEdges(UInt64 dst, const String & edge_type, ContextPtr context) const;
-
-    /// Read a single vertex by ID. Returns an empty block if not found.
-    Block readVertex(UInt64 id, ContextPtr context) const;
-
-    /// Get the out-degree of a vertex for a given edge type.
-    /// Returns 0 if the vertex has no edges of that type.
-    UInt64 getDegree(UInt64 src, const String & edge_type, ContextPtr context) const;
-
     /// --- Table management ---
 
     /// Create all four internal MergeTree tables. Called once during graph creation.
@@ -118,10 +97,19 @@ public:
     /// Check if internal tables have been created.
     bool isInitialized() const;
 
+protected:
+    /// Lazily build and cache the vertex/edge internal headers from the schema.
+    /// Used by the projection helpers in `IGraphStorage`.
+    const Block & getGraphHeader(GraphElementKind kind) const override;
+
 private:
     String graph_name;
     ContextMutablePtr context;
     GraphSchemaRegistry schema;
+
+    /// Cached internal headers, built on first access.
+    mutable Block vertex_header;
+    mutable Block edge_header;
 
     /// Internal table names (fully qualified).
     String verticesTableName() const;

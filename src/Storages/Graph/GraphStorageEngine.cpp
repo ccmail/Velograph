@@ -1,37 +1,23 @@
 #include <Storages/Graph/GraphStorageEngine.h>
 
-#include <Columns/ColumnArray.h>
-#include <Columns/ColumnsNumber.h>
-#include <Columns/ColumnString.h>
 #include <Common/Exception.h>
 #include <Common/logger_useful.h>
 #include <Core/Block.h>
-#include <DataTypes/DataTypeArray.h>
-#include <DataTypes/DataTypeFactory.h>
-#include <DataTypes/DataTypesNumber.h>
 #include <DataTypes/DataTypeString.h>
+#include <DataTypes/DataTypesNumber.h>
 #include <Interpreters/Context.h>
+#include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/InterpreterCreateQuery.h>
 #include <Interpreters/InterpreterDropQuery.h>
 #include <Interpreters/InterpreterInsertQuery.h>
-#include <Parsers/ASTCreateQuery.h>
 #include <Parsers/ASTDropQuery.h>
-#include <Parsers/ASTExpressionList.h>
-#include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTInsertQuery.h>
-#include <Parsers/ASTLiteral.h>
-#include <Parsers/ASTSelectQuery.h>
-#include <Parsers/ASTSelectWithUnionQuery.h>
-#include <Parsers/ASTTablesInSelectQuery.h>
-#include <Parsers/parseQuery.h>
 #include <Parsers/ParserCreateQuery.h>
-#include <Processors/Executors/PullingPipelineExecutor.h>
+#include <Parsers/parseQuery.h>
+#include <Processors/Executors/PushingPipelineExecutor.h>
 #include <QueryPipeline/BlockIO.h>
 #include <QueryPipeline/Pipe.h>
-#include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Storages/IStorage.h>
-#include <Storages/MergeTree/StorageMergeTree.h>
-#include <Storages/StorageFactory.h>
 
 namespace DB
 {
@@ -52,17 +38,25 @@ GraphStorageEngine::GraphStorageEngine(String graph_name_, ContextMutablePtr con
 
 // --- IGraphStorage overrides ---
 
-Pipe GraphStorageEngine::scan(
-    const SharedHeader & /*header*/,
-    const IColumn::Filter & /*header_filter*/,
-    GraphElementKind /*kind*/,
-    size_t /*max_block_size*/,
-    size_t /*num_streams*/)
+const Block & GraphStorageEngine::getGraphHeader(GraphElementKind kind) const
 {
-    /// TODO(graph-storage): route to `vertices` or `edges_forward` / `edges_reverse`
-    /// depending on `kind`. Until then fail closed so the planner does not
-    /// silently read empty data.
-    throw Exception(ErrorCodes::NOT_IMPLEMENTED, "GraphStorageEngine::scan is not implemented yet");
+    auto build = [](Block & header, const NamesAndTypes & columns)
+    {
+        if (header.columns() > 0)
+            return;
+        for (const auto & col : columns)
+            header.insert({col.type, col.name});
+    };
+
+    switch (kind)
+    {
+        case GraphElementKind::Vertex:
+            build(vertex_header, schema.getVerticesTableColumns());
+            return vertex_header;
+        case GraphElementKind::Edge:
+            build(edge_header, schema.getEdgesTableColumns());
+            return edge_header;
+    }
 }
 
 // --- Schema management ---
@@ -114,78 +108,42 @@ void GraphStorageEngine::createTable(
     const String & /*mv_source_table*/,
     const String & mv_select)
 {
-    /// Build CREATE TABLE AST programmatically
-    auto create_query = std::make_shared<ASTCreateQuery>();
-
-    size_t dot_pos = table_name.find('.');
-    if (dot_pos != String::npos)
+    /// Build the CREATE TABLE / CREATE MATERIALIZED VIEW statement as a SQL string
+    /// and parse it, rather than constructing the AST programmatically. This avoids
+    /// tight coupling to the internal AST layout (`ASTPtr` vs `std::shared_ptr`, column
+    /// declaration field names, etc.) and lets the parser handle all syntax details.
+    String sql;
+    sql += is_materialized_view ? "CREATE MATERIALIZED VIEW " : "CREATE TABLE ";
+    sql += table_name;
+    sql += " (";
+    for (size_t i = 0; i < columns.size(); ++i)
     {
-        create_query->database = table_name.substr(0, dot_pos);
-        create_query->table = table_name.substr(dot_pos + 1);
+        if (i > 0)
+            sql += ", ";
+        sql += columns[i].name + " " + columns[i].type->getName();
     }
-    else
-    {
-        create_query->table = table_name;
-    }
-
-    create_query->set(create_query->storage, std::make_shared<ASTStorage>());
+    sql += ")";
 
     /// `ReplacingMergeTree` takes the version column as its first engine argument so
     /// that duplicate rows are collapsed by `__RANK__` during compaction.
     if (engine == "ReplacingMergeTree")
-        create_query->storage->set(create_query->storage->engine, makeASTFunction(engine, makeASTIdentifier(COL_RANK)));
+        sql += " ENGINE = " + engine + "(" + COL_RANK + ")";
     else
-        create_query->storage->set(create_query->storage->engine, makeASTFunction(engine));
+        sql += " ENGINE = " + engine;
 
-    /// Columns
-    auto columns_ast = std::make_shared<ASTExpressionList>();
-    for (const auto & col : columns)
-    {
-        auto col_decl = std::make_shared<ASTColumnDeclaration>();
-        col_decl->name = col.name;
-        col_decl->type = col.type->getDefaultAST();
-        columns_ast->children.push_back(col_decl);
-    }
-
-    auto columns_list = std::make_shared<ASTColumns>();
-    columns_list->set(columns_list->columns, columns_ast);
-    create_query->set(create_query->columns_list, columns_list);
-
-    /// ORDER BY
     if (!order_by.empty())
-    {
-        auto order_by_ast = std::make_shared<ASTOrderByExpressionList>();
-        auto parts = String(order_by).split(",");
-        for (const auto & part : parts)
-        {
-            String trimmed = part;
-            trimmed.trim();
-            if (!trimmed.empty())
-                order_by_ast->children.push_back(std::make_shared<ASTIdentifier>(trimmed));
-        }
-        create_query->storage->set(create_query->storage->order_by, order_by_ast);
-    }
+        sql += " ORDER BY (" + order_by + ")";
 
-    /// Materialized view source
-    if (is_materialized_view)
-    {
-        /// Mark the statement as a `CREATE MATERIALIZED VIEW` so the create interpreter
-        /// treats it as a view-with-inner-table (no `TO` target): the MV itself owns the
-        /// SummingMergeTree storage and is populated automatically on inserts into the
-        /// source edge table.
-        create_query->is_materialized_view = true;
-        create_query->as_select = true;
-        /// Parse the SELECT query for the MV
-        ParserSelectWithUnionQuery parser;
-        String select_sql = mv_select;
-        const char * begin = select_sql.data();
-        const char * end = begin + select_sql.size();
-        auto select_ast = parseQuery(parser, begin, end, "", 0, 0);
-        create_query->set(create_query->select, select_ast);
-    }
+    if (is_materialized_view && !mv_select.empty())
+        sql += " AS " + mv_select;
 
-    /// Execute via InterpreterCreateQuery
-    InterpreterCreateQuery interpreter(create_query, context);
+    ParserCreateQuery parser;
+    const char * begin = sql.data();
+    const char * end = begin + sql.size();
+    auto ast = parseQuery(parser, begin, end, "CREATE TABLE for graph storage", 0, 0, 0);
+
+    InterpreterCreateQuery interpreter(ast, context);
+    interpreter.setInternal(true);
     interpreter.execute();
 }
 
@@ -266,33 +224,32 @@ StoragePtr GraphStorageEngine::getInternalStorage(const String & table_name) con
 
 void GraphStorageEngine::writeVertex(const Block & block)
 {
-    auto storage = getInternalStorage(verticesTableName());
+    auto insert_query = make_intrusive<ASTInsertQuery>();
+    insert_query->table_id = StorageID{graph_name, "vertices"};
 
-    auto insert_query = std::make_shared<ASTInsertQuery>();
-    insert_query->database = graph_name;
-    insert_query->table = "vertices";
-
-    InterpreterInsertQuery interpreter(insert_query, context, true /*allow_materialized*/);
+    InterpreterInsertQuery interpreter(insert_query, context, true /*allow_materialized*/, false, false, false);
     auto block_io = interpreter.execute();
-    auto & pipeline = block_io.pipeline;
 
-    pipeline.push(block);
-    pipeline.finish();
+    PushingPipelineExecutor executor(block_io.pipeline);
+    executor.start();
+    executor.push(block);
+    executor.finish();
 }
 
 void GraphStorageEngine::writeEdge(const Block & block)
 {
     /// Write to forward table
     {
-        auto insert_query = std::make_shared<ASTInsertQuery>();
-        insert_query->database = graph_name;
-        insert_query->table = "edges_forward";
+        auto insert_query = make_intrusive<ASTInsertQuery>();
+        insert_query->table_id = StorageID{graph_name, "edges_forward"};
 
-        InterpreterInsertQuery interpreter(insert_query, context, true);
+        InterpreterInsertQuery interpreter(insert_query, context, true, false, false, false);
         auto block_io = interpreter.execute();
 
-        block_io.pipeline.push(block);
-        block_io.pipeline.finish();
+        PushingPipelineExecutor executor(block_io.pipeline);
+        executor.start();
+        executor.push(block);
+        executor.finish();
     }
 
     /// Write to reverse table (swap __SRC__ and __DST__)
@@ -300,149 +257,31 @@ void GraphStorageEngine::writeEdge(const Block & block)
         /// Build a reversed block
         Block reversed_block = block.cloneEmpty();
 
-        size_t src_pos = block.getPositionByName("__SRC__");
-        size_t dst_pos = block.getPositionByName("__DST__");
+        size_t src_pos = block.getPositionByName(COL_SRC);
+        size_t dst_pos = block.getPositionByName(COL_DST);
 
         for (size_t i = 0; i < block.columns(); ++i)
         {
             const auto & col = block.getByPosition(i);
-            if (col.name == "__SRC__")
+            if (col.name == COL_SRC)
                 reversed_block.getByPosition(i).column = block.getByPosition(dst_pos).column;
-            else if (col.name == "__DST__")
+            else if (col.name == COL_DST)
                 reversed_block.getByPosition(i).column = block.getByPosition(src_pos).column;
             else
                 reversed_block.getByPosition(i).column = col.column;
         }
 
-        auto insert_query = std::make_shared<ASTInsertQuery>();
-        insert_query->database = graph_name;
-        insert_query->table = "edges_reverse";
+        auto insert_query = make_intrusive<ASTInsertQuery>();
+        insert_query->table_id = StorageID{graph_name, "edges_reverse"};
 
-        InterpreterInsertQuery interpreter(insert_query, context, true);
+        InterpreterInsertQuery interpreter(insert_query, context, true, false, false, false);
         auto block_io = interpreter.execute();
 
-        block_io.pipeline.push(reversed_block);
-        block_io.pipeline.finish();
+        PushingPipelineExecutor executor(block_io.pipeline);
+        executor.start();
+        executor.push(reversed_block);
+        executor.finish();
     }
-}
-
-// --- Read operations ---
-
-Pipe GraphStorageEngine::readForwardEdges(UInt64 src, const String & edge_type, ContextPtr read_context) const
-{
-    (void)src;
-    (void)edge_type;
-
-    auto storage = getInternalStorage(edgesForwardTableName());
-
-    /// TODO(graph-storage): push the `__SRC__ = src` (and optional `type = edge_type`)
-    /// predicate down into the MergeTree reader so the storage layer skips irrelevant
-    /// granules. The intended path is to build a `SELECT ... WHERE __SRC__ = N` AST,
-    /// parse it with `ParserSelectWithUnionQuery`, and run it through
-    /// `InterpreterSelectWithUnionQuery::buildQueryPlan`, which lets the MergeTree
-    /// optimizer extract a `KeyCondition` from the WHERE clause automatically. Direct
-    /// part-level reading (a la `ReadFromMergeTree`) is a later performance step.
-    /// Until then this scans the whole table, so it is correctness-only and not a real
-    /// traversal primitive.
-
-    auto snapshot = storage->getStorageSnapshot(read_context);
-    SelectQueryInfo query_info;
-    query_info.query = std::make_shared<ASTSelectQuery>();
-
-    /// Get all columns
-    Names column_names;
-    for (const auto & col : storage->getInMemoryMetadataPtr()->getColumns().getAll())
-        column_names.push_back(col.name);
-
-    QueryPlan plan;
-    storage->read(
-        plan,
-        column_names,
-        snapshot,
-        query_info,
-        read_context,
-        QueryProcessingStage::Complete,
-        8192, /// max_block_size
-        1); /// num_streams
-
-    return *plan.buildQueryPipeline(
-        QueryPlanOptimizationSettings(read_context),
-        BuildQueryPipelineSettings(read_context));
-}
-
-Pipe GraphStorageEngine::readReverseEdges(UInt64 dst, const String & edge_type, ContextPtr read_context) const
-{
-    (void)dst;
-    (void)edge_type;
-
-    auto storage = getInternalStorage(edgesReverseTableName());
-
-    /// TODO(graph-storage): push `__DST__ = dst` (and optional `type = edge_type`)
-    /// down via `InterpreterSelectWithUnionQuery` (see `readForwardEdges`). Until then
-    /// this scans the whole reverse-edge table.
-
-    auto snapshot = storage->getStorageSnapshot(read_context);
-    SelectQueryInfo query_info;
-
-    Names column_names;
-    for (const auto & col : storage->getInMemoryMetadataPtr()->getColumns().getAll())
-        column_names.push_back(col.name);
-
-    QueryPlan plan;
-    storage->read(plan, column_names, snapshot, query_info, read_context, QueryProcessingStage::Complete, 8192, 1);
-
-    return *plan.buildQueryPipeline(
-        QueryPlanOptimizationSettings(read_context),
-        BuildQueryPipelineSettings(read_context));
-}
-
-Block GraphStorageEngine::readVertex(UInt64 id, ContextPtr read_context) const
-{
-    (void)id;
-
-    auto storage = getInternalStorage(verticesTableName());
-
-    /// TODO(graph-storage): push `__ID__ = id` down via
-    /// `InterpreterSelectWithUnionQuery` and return the single matched block (empty
-    /// block if absent). Until then this scans the whole vertices table and returns an
-    /// empty-shaped block.
-
-    auto snapshot = storage->getStorageSnapshot(read_context);
-    SelectQueryInfo query_info;
-
-    Names column_names;
-    for (const auto & col : storage->getInMemoryMetadataPtr()->getColumns().getAll())
-        column_names.push_back(col.name);
-
-    QueryPlan plan;
-    storage->read(plan, column_names, snapshot, query_info, read_context, QueryProcessingStage::Complete, 8192, 1);
-
-    auto pipeline = plan.buildQueryPipeline(
-        QueryPlanOptimizationSettings(read_context),
-        BuildQueryPipelineSettings(read_context));
-
-    auto executor = std::make_unique<PullingPipelineExecutor>(*pipeline);
-    Block result;
-    Block block;
-    while (executor->pull(block))
-    {
-        if (!result)
-            result = block.cloneEmpty();
-    }
-    return result;
-}
-
-UInt64 GraphStorageEngine::getDegree(UInt64 src, const String & edge_type, ContextPtr read_context) const
-{
-    (void)src;
-    (void)edge_type;
-    (void)read_context;
-
-    /// TODO(graph-storage): query the `vertex_degrees` SummingMergeTree for
-    /// `SELECT sum(out_degree) FROM <graph>.vertex_degrees WHERE __SRC__ = N AND type = 'X'`.
-    /// `sum()` is required because compaction may not have merged partial rows yet;
-    /// the degree is eventually consistent (see design doc section 4.3).
-    return 0;
 }
 
 } // namespace DB
