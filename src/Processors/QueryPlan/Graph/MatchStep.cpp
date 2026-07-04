@@ -1,19 +1,24 @@
 #include <Processors/QueryPlan/Graph/MatchStep.h>
 
 #include <Columns/ColumnsNumber.h>
-#include <Core/Defines.h>
+#include <Common/Exception.h>
 #include <Core/Names.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <Parsers/IAST.h>
-#include <Processors/Sources/Graph/MatchSource.h>
-#include <QueryPipeline/Pipe.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
-#include <Storages/Graph/IGraphStorage.h>
 
 #include <algorithm>
 #include <memory>
 #include <utility>
 #include <vector>
+
+namespace DB
+{
+namespace ErrorCodes
+{
+extern const int LOGICAL_ERROR;
+}
+}
 
 namespace DB::Graph
 {
@@ -192,10 +197,11 @@ void addHeaderColumnsForClause(Block & header, std::vector<String> & names, cons
 
 }
 
-MatchStep::MatchStep(MatchSpec match_spec_, GraphStoragePtr graph_storage_, ContextPtr context_)
+MatchStep::MatchStep(MatchSpec match_spec_, GraphStoragePtr graph_storage_, Names referenced_columns_, ContextPtr context_)
     : ISourceStep(makeHeader(match_spec_))
     , match_spec(std::move(match_spec_))
     , graph_storage(std::move(graph_storage_))
+    , referenced_columns(std::move(referenced_columns_))
     , context(std::move(context_))
 {
     setStepDescription("GQL MATCH");
@@ -234,45 +240,15 @@ SharedHeader MatchStep::makeHeader(const MatchSpec & match_spec)
 
 QueryPlanStepPtr MatchStep::clone() const
 {
-    return std::make_unique<MatchStep>(cloneMatchSpec(match_spec), graph_storage, context);
+    return std::make_unique<MatchStep>(cloneMatchSpec(match_spec), graph_storage, referenced_columns, context);
 }
 
-void MatchStep::initializePipeline(QueryPipelineBuilder & pipeline, const BuildQueryPipelineSettings &)
+void MatchStep::initializePipeline(QueryPipelineBuilder & /*pipeline*/, const BuildQueryPipelineSettings &)
 {
-    if (graph_storage)
-    {
-        /// TODO(graph-storage): lower the full `MatchSpec` into a left-deep pipeline
-        /// of `scan` / `getVertex` / `getNeighbors` primitives. Variable-length paths
-        /// (`pathExpand`) are decomposed by the query engine into repeated primitive
-        /// operations, not pushed down as a single storage primitive.
-        ///
-        /// For now, start the plan with a vertex scan of the first node of the first
-        /// path; the remaining nodes and edges will be joined by `getVertex` /
-        /// `getNeighbors` once the execution model is wired up.
-        const auto & paths = match_spec.paths;
-        if (!paths.empty() && !paths.front().nodes.empty())
-        {
-            const auto & first_node = paths.front().nodes.front();
-            (void)first_node;
-            /// Use the Stage-1 (NameSet) overload so the storage builds the column
-            /// mask from the projection column names itself. This keeps `MatchStep`
-            /// agnostic of how the internal table header is laid out.
-            const auto & output_header = getOutputHeader();
-            NameSet projection_columns;
-            projection_columns.reserve(output_header->columns());
-            for (const auto & col : *output_header)
-                projection_columns.insert(col.name);
-
-            pipeline.init(graph_storage->scan(
-                projection_columns,
-                DB::GraphElementKind::Vertex,
-                DEFAULT_BLOCK_SIZE,
-                1));
-            return;
-        }
-    }
-
-    pipeline.init(Pipe(std::make_shared<MatchSource>(getOutputHeader(), match_spec)));
+    throw Exception(
+        ErrorCodes::LOGICAL_ERROR,
+        "MatchStep reached initializePipeline without being expanded by expandMatchSteps; "
+        "this means the pattern shape is not supported or the expansion pass did not run");
 }
 
 }
