@@ -61,6 +61,44 @@ public:
     /// The `xxxImpl` overrides here only need to be declared once concrete
     /// MergeTree key-condition pushdown is wired in.
 
+    /// --- Traversal primitive overrides ---
+    ///
+    /// Backed by direct calls to `MergeTreeDataSelectExecutor::read()` — no SQL
+    /// is parsed or executed. Key-condition pushdown (mark skipping) is wired
+    /// in progressively; the initial skeleton does full-scan with column
+    /// projection to validate the end-to-end path.
+
+    Pipe scanImpl(
+        const SharedHeader & header,
+        const IColumn::Filter & header_filter,
+        GraphElementKind kind,
+        size_t max_block_size,
+        size_t num_streams) override;
+
+    Pipe getVertexImpl(
+        const SharedHeader & header,
+        const IColumn::Filter & header_filter,
+        const Columns & id_columns,
+        size_t max_block_size,
+        size_t num_streams) override;
+
+    Pipe getEdgeImpl(
+        const SharedHeader & header,
+        const IColumn::Filter & header_filter,
+        const Columns & edge_key_columns,
+        size_t max_block_size,
+        size_t num_streams) override;
+
+    Pipe getNeighborsImpl(
+        const SharedHeader & header,
+        const IColumn::Filter & header_filter,
+        GraphDirection direction,
+        const Columns & input_vertex_columns,
+        size_t max_block_size,
+        size_t num_streams,
+        size_t limit_per_vertex,
+        ASTPtr filter_pushdown) override;
+
     /// --- Schema management ---
 
     /// Register a vertex type in the schema and ensure the internal tables
@@ -119,6 +157,21 @@ private:
 
     /// Get the Storage object for an internal table. Throws if not found.
     StoragePtr getInternalStorage(const String & table_name) const;
+
+    /// Read columns directly from an internal MergeTree table via
+    /// `MergeTreeDataSelectExecutor::read()` — no SQL parsing, no
+    /// `InterpreterSelectQuery`. The `SelectQueryInfo` is constructed
+    /// in-place with an empty filter; key-condition pushdown is added
+    /// progressively in the `xxxImpl` overrides.
+    Pipe readFromInternalTable(
+        const String & table_name,
+        const Names & column_names,
+        size_t max_block_size,
+        size_t num_streams);
+
+    /// Collect column names from a projection header (the subset requested
+    /// by the caller after `IGraphStorage` column-mask resolution).
+    static Names buildColumnNames(const SharedHeader & header);
 
     /// Build and execute a CREATE TABLE query for an internal MergeTree table.
     void createTable(const String & table_name, const NamesAndTypes & columns, const String & order_by, const String & engine,
