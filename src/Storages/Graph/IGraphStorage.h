@@ -49,6 +49,7 @@ enum class GraphDirection : UInt8
 /// Column name used internally for the edge source. Identifying these by name
 /// (instead of by a fixed column index) keeps the BACKWARD src/dst swap robust
 /// to changes in the internal table layout.
+inline static const char * const GRAPH_COL_ID = "__ID__";
 inline static const char * const GRAPH_COL_SRC = "__SRC__";
 inline static const char * const GRAPH_COL_DST = "__DST__";
 

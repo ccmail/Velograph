@@ -12,6 +12,7 @@
 #include <Interpreters/InterpreterInsertQuery.h>
 #include <Parsers/ASTDropQuery.h>
 #include <Parsers/ASTInsertQuery.h>
+#include <Parsers/ASTSelectQuery.h>
 #include <Parsers/ParserCreateQuery.h>
 #include <Parsers/parseQuery.h>
 #include <Processors/Executors/PushingPipelineExecutor.h>
@@ -101,7 +102,10 @@ Pipe GraphStorageEngine::readFromInternalTable(
     /// Construct an empty `SelectQueryInfo` — no SQL, no AST. The filter
     /// is empty so `read()` does a full scan with only column projection.
     /// Key-condition pushdown will be added by the `xxxImpl` overrides.
+    /// A dummy `ASTSelectQuery` is needed because `MergeTreeDataSelectExecutor::read`
+    /// dereferences `query_info.query` during analysis.
     SelectQueryInfo query_info;
+    query_info.query = ASTPtr(new ASTSelectQuery());
     query_info.is_internal = true;
 
     MergeTreeDataSelectExecutor executor(*merge_tree);
@@ -109,9 +113,14 @@ Pipe GraphStorageEngine::readFromInternalTable(
         column_names, snapshot, query_info, context,
         max_block_size, num_streams);
 
+    /// Disable plan optimization for internal reads: the `SelectQueryInfo`
+    /// has a dummy AST, and optimization passes that expect a real query
+    /// (e.g. filter pushdown, prewhere) must not run.
     QueryPlanResourceHolder resources;
+    QueryPlanOptimizationSettings optimization_settings(context);
+    optimization_settings.optimize_plan = false;
     auto builder = plan->buildQueryPipeline(
-        QueryPlanOptimizationSettings{context}, BuildQueryPipelineSettings{context});
+        optimization_settings, BuildQueryPipelineSettings{context});
     return QueryPipelineBuilder::getPipe(std::move(*builder), resources);
 }
 
@@ -204,6 +213,8 @@ Pipe GraphStorageEngine::getNeighborsImpl(
             return Pipe::unitePipes(std::move(pipes));
         }
     }
+
+    throw Exception(ErrorCodes::LOGICAL_ERROR, "Unknown graph direction in getNeighborsImpl");
 }
 
 // --- Schema management ---

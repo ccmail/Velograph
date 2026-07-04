@@ -15,11 +15,26 @@ extern const int LOGICAL_ERROR;
 extern const int UNKNOWN_ELEMENT;
 } // namespace ErrorCodes
 
-static const auto & idType() { return std::make_shared<DataTypeUInt64>(); }
-static const auto & rankType() { return std::make_shared<DataTypeUInt64>(); }
-static const auto & typeType() { return std::make_shared<DataTypeString>(); }
-static const auto & labelsType() { return std::make_shared<DataTypeArray>(std::make_shared<DataTypeString>()); }
-static const auto & degreeType() { return std::make_shared<DataTypeUInt64>(); }
+static const auto & idType()
+{
+    static const auto type = std::make_shared<DataTypeUInt64>();
+    return type;
+}
+static const auto & rankType()
+{
+    static const auto type = std::make_shared<DataTypeUInt64>();
+    return type;
+}
+static const auto & typeType()
+{
+    static const auto type = std::make_shared<DataTypeString>();
+    return type;
+}
+static const auto & labelsType()
+{
+    static const auto type = std::make_shared<DataTypeArray>(std::make_shared<DataTypeString>());
+    return type;
+}
 
 void GraphSchemaRegistry::registerVertexType(const String & name, const NamesAndTypes & columns)
 {
