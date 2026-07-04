@@ -112,7 +112,7 @@ The current implementation supports the parser-facing slice that is already stab
 The current refactor keeps the `antlr4` side and the `IAST` side intentionally separate:
 
 - The `visit*` boundaries in `GQLParseTreeVisitor` follow `GQL.g4`.
-- The `IAST` layer is normalized in a `kgraph`-style shape, instead of mirroring every parse-tree wrapper rule.
+- The `IAST` layer is normalized in a graph-native shape, instead of mirroring every parse-tree wrapper rule.
 - Pure grammar pass-through nodes such as `compositeQueryStatement` are not preserved as dedicated AST wrappers.
 
 This keeps the visitor easy to debug against the grammar while still producing a stable AST contract for later planner work.
@@ -130,7 +130,7 @@ The current query-level contract is:
 | top-level `selectStatement` | `GQLSingleQuery` | starts with `GQLSelectClause`, followed by `GQLPageClause` when paging is present |
 | `nestedQuerySpecification` | `GQLSubquery` | preserves the wrapper; the inner `query` child is itself a normalized query root |
 
-This is the main design rule that aligns the ClickHouse visitor with `kgraph`:
+This is the main design rule that aligns the ClickHouse visitor with the graph-native AST shape:
 
 - grammar decides which `visit*` methods exist;
 - AST normalization decides which nodes are allowed to become public query roots.

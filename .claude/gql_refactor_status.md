@@ -23,8 +23,8 @@
 
 ### AST layer
 
-- The new AST is intentionally kgraph-shaped but ClickHouse-native.
-- All graph nodes inherit from `IAST` or `ASTWithAlias`, not kgraph `INode`.
+- The new AST is intentionally graph-native but ClickHouse-native.
+- All graph nodes inherit from `IAST` or `ASTWithAlias`, not the earlier `INode`.
 - `IAST::children` must stay dense and non-null; optional graph children should stay in named fields and only be pushed into `children` when present.
 - Query roots should stay stable:
   - linear clause queries return `GQLSingleQuery`;
@@ -150,7 +150,7 @@ Interpreter framework gaps to keep visible:
 4. `SELECT FROM` source-list handling now has a dedicated `SourceCompositionLowering` module with a reusable entry-classification API. It can lower same-graph graph-match source lists into one `GraphMatch` source, while different graph references, mixed source kinds, and true multi-source composition still need real operator semantics.
 5. Expression lowering still covers only the common scalar subset; temporal / duration / value-query / path-constructor / graph-expression execution lowering remains deferred.
 6. `GQLCatalogStatement` and DML clauses have parser AST coverage and dedicated lowering boundaries. They are dispatched from `PlanBuilder` / pipeline-only `SubqueryLowering`, where `PlanEnvironment` is available for future catalog / storage services, but there is still no catalog / mutation execution.
-7. `ClauseSequenceLowering` owns linear `GQLSingleQuery` clause-order dispatch. `PlanBuilder` now holds query-level state, while clause sequencing is a dedicated layer closer to the `kgraph` clause-query interpreter style.
+7. `ClauseSequenceLowering` owns linear `GQLSingleQuery` clause-order dispatch. `PlanBuilder` now holds query-level state, while clause sequencing is a dedicated layer closer to the clause-query interpreter style.
 8. `PipelineLowering` centralizes post-source clause dispatch so `ClauseSequenceLowering`, pipeline-only `SubqueryLowering`, and source-free query lowering share the same catalog / DML / pipeline `CALL` / pure pipeline-clause ordering after a source exists.
 9. Full `ninja` verification is currently blocked by local build-directory regenerate issues under `build/contrib`; use direct TU compilation from `build/compile_commands.json` only as source-level isolation until the build directory is repaired.
 

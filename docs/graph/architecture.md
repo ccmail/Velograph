@@ -37,9 +37,11 @@ Important properties of the current pipeline:
   `IParserBase` implementation.
 - The parser bypasses ClickHouse SQL token splitting and sends the complete
   caller-provided `GQL` span to ANTLR.
-- Supported `GQLSingleQuery` and `GQLCombinedQuery` roots now enter
-  `InterpreterGQLQuery`; unsupported runtime shapes still fail closed with
-  explicit unsupported exceptions.
+- Supported `GQLSingleQuery` and `GQLCombinedQuery` roots enter
+  `InterpreterGQLQueryAnalyzer` (QueryTree + analysis passes + planner);
+  unsupported runtime shapes still fail closed with explicit unsupported
+  exceptions. The older `InterpreterGQLQuery` direct planner path is frozen
+  legacy pending removal.
 
 ## Source Layout
 
@@ -93,7 +95,7 @@ the historical implementation shape and should not be used for new work.
 ## AST Contract
 
 The parser produces ClickHouse-native AST nodes. Graph-specific nodes inherit
-from `IAST` or `ASTWithAlias`; they do not use the earlier kgraph `INode`
+from `IAST` or `ASTWithAlias`; they do not use the earlier `INode`
 ownership model.
 
 The stable public root shapes are:
@@ -133,26 +135,23 @@ The future runtime layers are:
 
 | Layer | Target Responsibility | Current State |
 |-------|-----------------------|---------------|
-| Interpreter / analyzer | Resolve graph names, validate AST, bind graph variables, and choose planning strategy. | Not implemented. |
+| Interpreter / analyzer | Resolve graph names, validate AST, bind graph variables, and choose planning strategy. | Active: `InterpreterGQLQueryAnalyzer` + GQL QueryTree passes; predicate normalization and property resolution planned in [match_execution/](match_execution/00_overview.md) M2. |
+| Graph storage engine | Manage internal MergeTree tables and expose traversal primitives with projection and predicate pushdown. | Active scaffold: `GraphStorageEngine` internal tables and primitive skeletons; pushdown planned in match_execution M3/M4. |
 | Graph catalog | Store property graph definitions and map labels / properties to ClickHouse tables and columns. | Design only. |
-| Query-plan operators | Represent scans, expand steps, multi-hop traversal, and vertex lookup. | Design only. |
-| Pipeline processors | Execute expand and lookup operations while reusing ClickHouse processors where possible. | Design only. |
+| Query-plan operators | Represent scans, expand steps, and vertex lookup; participate in QueryPlan optimizations. | In design / build: see match_execution 03/04. |
+| Pipeline processors | Execute expand and lookup operations while reusing ClickHouse processors where possible. | In design / build: see match_execution 03. |
 
 ## Target Execution Model
 
-For graph pattern execution, the planned model is expand-based rather than a
-pure SQL-join rewrite:
+For graph pattern execution, the model is expand-based rather than a pure
+SQL-join rewrite: the planner emits one logical `MatchStep`, a plan-expansion
+optimization decomposes it into physical operators (`MatchVertexStep`,
+`MatchExpandStep`, `MatchVertexLookupStep`, ...), and standard plus
+graph-specific QueryPlan optimizations bind `WHERE` conjuncts to those
+operators so predicates are evaluated during the `MergeTree` scan itself.
 
-```text
-start vertex scan
-  -> expand through edge table
-  -> lookup destination vertices
-  -> filter / aggregate / project with ClickHouse plan steps
-```
-
-This model is intended to support variable-length paths, frontier pruning,
-visited-set tracking, and future graph algorithms. The design is documented in
-[Graph operators](operators.md), but these operators are not yet implemented.
+The authoritative design, operator contracts, and milestones live in
+[match_execution/](match_execution/00_overview.md).
 
 ## Integration Boundaries
 

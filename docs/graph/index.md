@@ -14,11 +14,12 @@ ClickHouse. It aims to support standard `GQL` over data stored in ordinary
 ClickHouse tables, while reusing ClickHouse's `MergeTree` storage, vectorized
 execution, distributed query infrastructure, settings, and resource tracking.
 
-The project is currently transitioning from parser-first work into the first
-interpreter / planner path. The main stable contract is still `GQL text ->
-normalized GQL IAST`, and supported query roots now enter an initial
-`InterpreterGQLQuery` / `GQL::GQLPlanBuilder` direct planner path. Graph catalog
-execution and real graph storage integration are still future work.
+The project is currently transitioning from parser-first work into the
+analyzer / planner / storage integration phase. The main stable contract is
+still `GQL text -> normalized GQL IAST`; supported query roots enter the
+QueryTree-based `InterpreterGQLQueryAnalyzer` path. The authoritative design
+for `MATCH` execution and graph storage integration lives in
+[match_execution/](match_execution/00_overview.md).
 
 ## Goals
 
@@ -48,9 +49,10 @@ execution and real graph storage integration are still future work.
 | AST layer | Active | Graph nodes live under `src/Parsers/graph/AST` and inherit from `IAST` or `ASTWithAlias`. |
 | Visitor | Active | `GQLParseTreeVisitor` is split by query, projection, pattern, expression, DML, DDL, and type handling. |
 | Parser tests | Active | Contract tests live in `src/Parsers/graph/tests/gtest_gql_parser.cpp`. |
-| Interpreter / planner | Active MVP | `GQLSingleQuery` and `GQLCombinedQuery` enter `InterpreterGQLQuery`; reusable helpers under `src/Interpreters/GQL` plan supported source and post-source clauses while unsupported shapes fail closed. |
+| Interpreter / planner | Active | `GQLSingleQuery` and `GQLCombinedQuery` enter `InterpreterGQLQueryAnalyzer` (QueryTree + passes + `GQLPlanner`); the older `InterpreterGQLQuery` direct planner path is frozen legacy pending removal. |
+| Graph storage engine | Active | `GraphStorageEngine` manages internal MergeTree tables and exposes traversal primitives (`scan`, `getVertex`, `getEdge`, `getNeighbors`). |
+| `MATCH` execution | In design / build | Authoritative plan: [match_execution/](match_execution/00_overview.md) (plan expansion, filter pushdown, storage pushdown, milestones M1-M5). |
 | Graph catalog execution | Design only | `catalog.md` describes the target table-mapping model. |
-| Graph operators | Initial boundary | `Graph::MatchStep` and `Graph::MatchSource` define the current source contract; real expand / traversal operators remain design work. |
 
 ## Parser-Only Contract
 
@@ -79,14 +81,16 @@ changes the interpreter contract.
 
 | Document | Use It For |
 |----------|------------|
+| [MATCH execution design](match_execution/00_overview.md) | Authoritative architecture and milestones for `MATCH` planning, optimization, and storage pushdown. |
 | [GQL parser design](parser.md) | Current parser architecture, AST contract, supported syntax, and dispatch rules. |
-| [Interpreter readiness checklist](gql_ast_interpreter_todo.md) | Stable AST surface and fail-closed rules for future planner work. |
-| [GQL runtime flow](gql_runtime_flow.md) | Code-reading guide from `executeQuery` through parser, runtime flow, current planner mapping, `MatchStep`, and `MatchSource`. |
 | [Architecture](architecture.md) | Current implementation layers and target runtime architecture. |
-| [Roadmap](roadmap.md) | Milestones, current parser work, and next implementation slices. |
 | [Graph catalog design](catalog.md) | Future property graph catalog and table mapping model. |
-| [Graph operators design](operators.md) | Future expand and multi-hop execution design. |
 | [Grammar notes](../../src/Parsers/graph/grammar/README.md) | Local grammar changes and generation workflow. |
+
+Superseded documents (`gql_runtime_flow.md`, `gql_ast_interpreter_todo.md`,
+`gql_analyzer_refactoring_plan.md`, `roadmap.md`, `operators.md`) were removed
+in favor of `match_execution/`; consult git history if the historical context
+is needed.
 
 Historical parser notes live in [development/parser/README.md](development/parser/README.md).
 They are kept for context only; the parser design document and status roadmap are
