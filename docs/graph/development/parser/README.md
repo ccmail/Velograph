@@ -9,8 +9,8 @@ work.
 Current references:
 
 - [GQL parser design](../../parser.md)
-- [GQL AST / Interpreter Readiness](../../gql_ast_interpreter_todo.md)
-- [LeoGraph roadmap](../../roadmap.md)
+- [MATCH execution overview](../../match_execution/00_overview.md)
+- [Milestones](../../match_execution/06_milestones.md)
 - [Grammar generation notes](../../../../src/Parsers/graph/grammar/README.md)
 - Repository-local live status: `.claude/gql_refactor_status.md`
 
@@ -36,5 +36,5 @@ Those names are historical. Current parser work uses:
 ## Current Rule
 
 For new development, treat this file as an archive only. Update
-`docs/graph/parser.md`, `docs/graph/roadmap.md`, and
+`docs/graph/parser.md`, `docs/graph/match_execution/06_milestones.md`, and
 `.claude/gql_refactor_status.md` instead when parser behavior or status changes.
