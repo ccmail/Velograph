@@ -20,6 +20,7 @@
 #include <Interpreters/ActionsDAG.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/GQL/GQLPlanBuilder.h>
+#include <Interpreters/GQL/GraphResolver.h>
 #include <Interpreters/GQL/PlanScope.h>
 #include <Parsers/ASTSelectIntersectExceptQuery.h>
 #include <Parsers/graph/GraphAST.h>
@@ -387,10 +388,31 @@ void planMatchFromTree(QueryPlan & plan, const GQLMatchNode & match_node, Contex
 {
     auto match_spec = buildMatchSpecFromTree(match_node);
 
-    /// A graph storage would be resolved here through DatabaseCatalog from the active graph
-    /// scope; until one is registered, the null storage falls back to an empty source inside
-    /// MatchStep.
-    plan.addStep(std::make_unique<Graph::MatchStep>(std::move(match_spec), nullptr, context));
+    /// Resolve the active graph storage from the context (current database).
+    auto graph_storage = resolveActiveGraphStorage(match_spec, context);
+
+    /// Collect referenced columns (variable names) for the MatchStep header.
+    /// M1: only variable id columns; property columns are added in M2.
+    Names referenced_columns;
+    for (const auto & clause : match_spec.clauses)
+    {
+        for (const auto & path : clause.paths)
+        {
+            for (const auto & node : path.nodes)
+            {
+                if (!node.variable.empty())
+                    referenced_columns.push_back(node.variable);
+            }
+            for (const auto & edge : path.edges)
+            {
+                if (!edge.variable.empty())
+                    referenced_columns.push_back(edge.variable);
+            }
+        }
+    }
+
+    plan.addStep(std::make_unique<Graph::MatchStep>(
+        std::move(match_spec), std::move(graph_storage), std::move(referenced_columns), context));
     scope.replaceWithHeader(*plan.getCurrentHeader(), BindingKind::Source);
 
     /// MATCH ... WHERE is planned as a post-source FilterStep. The predicate also stays a
