@@ -136,6 +136,13 @@ void QueryPlan::addStep(QueryPlanStepPtr step) {
 QueryPipelineBuilderPtr QueryPlan::buildQueryPipeline(const QueryPlanOptimizationSettings &optimization_settings,
                                                       const BuildQueryPipelineSettings &build_pipeline_settings, bool do_optimize) {
   checkInitialized();
+
+  /// Expand logical MatchStep nodes into physical graph operators.
+  /// This is lowering, not optimization: it must run unconditionally
+  /// (even when do_optimize=false) so that GQL MATCH plans are always
+  /// in physical form before pipeline initialization.
+  QueryPlanOptimizations::expandMatchSteps(*root, nodes);
+
   if (do_optimize) optimize(optimization_settings);
 
   struct Frame {

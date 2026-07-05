@@ -5,7 +5,6 @@
 #include <Processors/QueryPlan/MergingAggregatedStep.h>
 #include <Processors/QueryPlan/Optimizations/considerEnablingParallelReplicas.h>
 #include <Processors/QueryPlan/Optimizations/Optimizations.h>
-#include <Processors/QueryPlan/Optimizations/expandMatchSteps.h>
 #include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
 #include <Processors/QueryPlan/Optimizations/Utils.h>
 #include <Processors/QueryPlan/QueryPlan.h>
@@ -42,12 +41,6 @@ extern const int PROJECTION_NOT_USED;
 namespace QueryPlanOptimizations {
 
 void optimizeTreeFirstPass(const QueryPlanOptimizationSettings &optimization_settings, QueryPlan::Node &root, QueryPlan::Nodes &nodes) {
-  /// Expand logical MatchStep nodes into physical graph operators.
-  /// This is lowering, not optimization: it must run even when plan
-  /// optimizations are disabled, so that GQL MATCH plans are always
-  /// in physical form before pipeline initialization.
-  expandMatchSteps(root, nodes);
-
   if (!optimization_settings.optimize_plan) return;
 
   struct Frame {
