@@ -17,6 +17,11 @@
   `FilterStep` 朴素求值，结果仍正确（这也是 D8 两态对照的基础）。展开后才轮到
   现有 first-pass 优化（`tryPushDownFilter` 等看到的已是展开树）。无条件全树
   遍历：非 GQL 计划里不存在 `MatchStep`，遍历零命中即零开销，不加开关。
+- `QueryPlan::buildQueryPipeline` 的 `do_optimize = false` 会完全跳过
+  `QueryPlan::optimize`，它与 `query_plan_enable_optimizations = 0` 不是同一条路径；
+  因此 pipeline 构建入口在该分支直接补调 `expandMatchSteps`。标准执行路径和直接
+  调用 `QueryPlan::optimize`（包括 `EXPLAIN PLAN optimize = 1`）仍由
+  `optimizeTreeFirstPass` 展开。pass 只命中逻辑 `MatchStep`，重复调用保持幂等。
 - 节点替换机制参考"逻辑步转物理步"的既有先例 `convertLogicalJoinToPhysical`
   （`Optimizations.h:195`，于二阶段调用；本 pass 只借鉴其节点替换写法）：遍历
   `QueryPlan::Node`，命中 `typeid_cast<Graph::MatchStep *>` 的节点，就地把该节点
@@ -151,6 +156,8 @@ M5 开工前出补充设计（含 expand-vs-join 的代价择优、锚点选择�
 ## 7. 验收要点
 
 - M1：`MATCH (n) RETURN n` 展开为单 `MatchVertexStep`，`EXPLAIN PLAN` 可见。
+  同时覆盖 `query_plan_enable_optimizations = 0`、pipeline
+  `do_optimize = false` 与直接 `QueryPlan::optimize` 三条入口。
 - M4：北极星查询展开为
   `MatchVertexStep(a) → MatchExpandStep(e) → MatchVertexLookupStep(b)` 链，
   端到端结果与朴素全扫描 + `FilterStep` 基线一致（谓词下推开关两态对比）。

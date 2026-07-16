@@ -4,6 +4,8 @@
 
 #  include <gtest/gtest.h>
 
+#  include <base/scope_guard.h>
+
 #  include <Common/Exception.h>
 #  include <Common/assert_cast.h>
 #  include <Common/tests/gtest_global_context.h>
@@ -25,18 +27,27 @@
 #  include <Parsers/graph/GraphAST.h>
 #  include <Parsers/graph/ParserGQLQuery.h>
 #  include <Processors/QueryPlan/AggregatingStep.h>
+#  include <Processors/QueryPlan/BuildQueryPipelineSettings.h>
 #  include <Processors/QueryPlan/DistinctStep.h>
 #  include <Processors/QueryPlan/ExpressionStep.h>
 #  include <Processors/QueryPlan/FilterStep.h>
 #  include <Processors/QueryPlan/Graph/MatchStep.h>
+#  include <Processors/QueryPlan/Graph/MatchVertexStep.h>
 #  include <Processors/QueryPlan/LimitStep.h>
+#  include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
 #  include <Processors/QueryPlan/Optimizations/expandMatchSteps.h>
 #  include <Processors/QueryPlan/QueryPlan.h>
 #  include <Processors/QueryPlan/SortingStep.h>
 #  include <Processors/Executors/PullingPipelineExecutor.h>
+#  include <QueryPipeline/Pipe.h>
+#  include <QueryPipeline/QueryPipelineBuilder.h>
 #  include <Storages/Graph/GraphStorageEngine.h>
+#  include <Storages/Graph/IGraphStorage.h>
 #  include <Storages/Graph/StorageEmptyGraph.h>
 
+#  include <algorithm>
+#  include <exception>
+#  include <utility>
 #  include <vector>
 
 using namespace DB;
@@ -45,7 +56,9 @@ namespace GAST = DB::OPENGQL::AST;
 
 namespace DB::ErrorCodes
 {
+extern const int LOGICAL_ERROR;
 extern const int NOT_IMPLEMENTED;
+extern const int UNKNOWN_TABLE;
 }
 
 namespace
@@ -55,6 +68,75 @@ ContextPtr getInterpreterContext()
 {
     tryRegisterFunctions();
     return getContext().context;
+}
+
+class TestGraphStorage final : public IGraphStorage
+{
+public:
+    explicit TestGraphStorage(const String & database_name)
+        : IGraphStorage(StorageID{database_name, "_graph"})
+    {
+        vertex_header.insert({std::make_shared<DataTypeUInt64>(), GRAPH_COL_ID});
+    }
+
+    String getName() const override { return "TestGraph"; }
+
+protected:
+    const Block & getGraphHeader(GraphElementKind /*kind*/) const override
+    {
+        return vertex_header;
+    }
+
+    Pipe scanImpl(
+        const SharedHeader & /*header*/,
+        const IColumn::Filter & /*header_filter*/,
+        GraphElementKind /*kind*/,
+        size_t /*max_block_size*/,
+        size_t /*num_streams*/) override
+    {
+        return {};
+    }
+
+private:
+    Block vertex_header;
+};
+
+template <typename Callable>
+auto withRegisteredGraphStorage(const GraphStoragePtr & storage, Callable && callable)
+{
+    auto & context = getMutableContext().context;
+    const auto database = DatabaseCatalog::instance().getDatabase(context->getCurrentDatabase());
+    if (!database)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Current test database is not registered");
+    if (database->isTableExist("_graph", context))
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Test graph storage is already registered");
+
+    database->attachTable(context, "_graph", storage, "");
+    SCOPE_EXIT({ database->detachTable(context, "_graph"); });
+
+    return std::forward<Callable>(callable)();
+}
+
+template <typename Callable>
+void expectExceptionCode(Callable && callable, int expected_code)
+{
+    try
+    {
+        std::forward<Callable>(callable)();
+        FAIL() << "Expected DB::Exception with code " << expected_code;
+    }
+    catch (const Exception & e)
+    {
+        EXPECT_EQ(e.code(), expected_code) << e.displayText();
+    }
+    catch (const std::exception & e)
+    {
+        FAIL() << "Expected DB::Exception, got std::exception: " << e.what();
+    }
+    catch (...)
+    {
+        FAIL() << "Expected DB::Exception, got an unknown exception";
+    }
 }
 
 ASTPtr parseGQL(const std::string & query)
@@ -73,8 +155,39 @@ QueryPlan buildPlan(const std::string & query)
 
 QueryPlan buildPlanWithAnalyzer(const std::string & query, const GQLQueryOptions & options = {})
 {
-    InterpreterGQLQueryAnalyzer interpreter(parseGQL(query), getInterpreterContext(), options);
-    return std::move(interpreter).extractQueryPlan();
+    auto & context = getMutableContext().context;
+    auto storage = std::make_shared<TestGraphStorage>(context->getCurrentDatabase());
+    return withRegisteredGraphStorage(
+        storage,
+        [&]
+        {
+            InterpreterGQLQueryAnalyzer interpreter(parseGQL(query), context, options);
+            return std::move(interpreter).extractQueryPlan();
+        });
+}
+
+Graph::MatchSpec makeSingleVertexMatchSpec(const String & variable)
+{
+    Graph::MatchNodeSpec node;
+    node.variable = variable;
+
+    Graph::MatchPathSpec path;
+    path.nodes.push_back(std::move(node));
+
+    Graph::MatchClauseSpec clause;
+    clause.paths.push_back(std::move(path));
+
+    Graph::MatchSpec spec;
+    spec.clauses.push_back(std::move(clause));
+    return spec;
+}
+
+QueryPlan makeSingleVertexMatchPlan(const GraphStoragePtr & storage)
+{
+    QueryPlan plan;
+    plan.addStep(std::make_unique<Graph::MatchStep>(
+        makeSingleVertexMatchSpec("n"), storage, Names{"n"}, getInterpreterContext()));
+    return plan;
 }
 
 QueryPlan buildPlanWithGQLPlanBuilder(const std::string & query)
@@ -1528,9 +1641,15 @@ TEST(GQLQueryTreeAnalyzer, RunOnlyResolveStillBuildsResolvedPlan)
 
 TEST(GQLQueryTreeAnalyzer, GetSampleBlockReturnsHeaderWithoutExecuting)
 {
-    InterpreterGQLQueryAnalyzer interpreter(parseGQL("MATCH (n) RETURN n"), getInterpreterContext());
-
-    const auto header = interpreter.getSampleBlock();
+    auto & context = getMutableContext().context;
+    auto storage = std::make_shared<TestGraphStorage>(context->getCurrentDatabase());
+    const auto header = withRegisteredGraphStorage(
+        storage,
+        [&]
+        {
+            InterpreterGQLQueryAnalyzer interpreter(parseGQL("MATCH (n) RETURN n"), context);
+            return interpreter.getSampleBlock();
+        });
     ASSERT_NE(header, nullptr);
     ASSERT_EQ(header->columns(), 1u);
     EXPECT_EQ(header->getByPosition(0).name, "n");
@@ -1542,38 +1661,38 @@ TEST(GQLQueryTreeAnalyzer, GetSampleBlockReturnsHeaderWithoutExecuting)
 /// UNKNOWN_TABLE, never silently produce empty results (P3 fail-closed).
 TEST(GQLInterpreter, MatchWithoutGraphThrowsUnknownTable)
 {
-    EXPECT_THROW(buildPlanWithAnalyzer("MATCH (n) RETURN n"), Exception);
+    expectExceptionCode(
+        []
+        {
+            InterpreterGQLQueryAnalyzer interpreter(
+                parseGQL("MATCH (n) RETURN n"), getInterpreterContext());
+            (void)std::move(interpreter).extractQueryPlan();
+        },
+        ErrorCodes::UNKNOWN_TABLE);
 }
 
 /// OPTIONAL MATCH is preserved in spec but rejected by execution.
 TEST(GQLInterpreter, OptionalMatchThrowsNotImplemented)
 {
-    EXPECT_THROW(buildPlanWithAnalyzer("OPTIONAL MATCH (n) RETURN n"), Exception);
+    expectExceptionCode(
+        [] { (void)buildPlanWithAnalyzer("OPTIONAL MATCH (n) RETURN n"); },
+        ErrorCodes::NOT_IMPLEMENTED);
 }
 
 /// M1: a MatchStep reaching expandMatchSteps without resolved storage
 /// is a logic error (planner should have resolved storage first).
 TEST(GQLInterpreter, ExpandMatchStepsWithoutStorageThrowsLogicalError)
 {
-    Graph::MatchSpec spec;
-    Graph::MatchClauseSpec clause;
-    Graph::MatchPathSpec path;
-    Graph::MatchNodeSpec node_spec;
-    node_spec.variable = "n";
-    path.nodes.push_back(node_spec);
-    clause.paths.push_back(path);
-    spec.clauses.push_back(clause);
-
     auto step = std::make_unique<Graph::MatchStep>(
-        std::move(spec), nullptr, Names{"n"}, getInterpreterContext());
+        makeSingleVertexMatchSpec("n"), nullptr, Names{"n"}, getInterpreterContext());
 
     QueryPlan::Nodes nodes;
     auto & plan_node = nodes.emplace_back();
     plan_node.step = std::move(step);
 
-    EXPECT_THROW(
-        QueryPlanOptimizations::expandMatchSteps(plan_node, nodes),
-        Exception);
+    expectExceptionCode(
+        [&] { QueryPlanOptimizations::expandMatchSteps(plan_node, nodes); },
+        ErrorCodes::LOGICAL_ERROR);
 }
 
 /// M1: edge patterns like (a)-[e]->(b) must throw NOT_IMPLEMENTED during
@@ -1604,9 +1723,46 @@ TEST(GQLInterpreter, ExpandMatchStepsEdgePatternThrowsNotImplemented)
     auto & plan_node = nodes.emplace_back();
     plan_node.step = std::move(step);
 
-    EXPECT_THROW(
-        QueryPlanOptimizations::expandMatchSteps(plan_node, nodes),
-        Exception);
+    expectExceptionCode(
+        [&] { QueryPlanOptimizations::expandMatchSteps(plan_node, nodes); },
+        ErrorCodes::NOT_IMPLEMENTED);
+}
+
+/// Lowering belongs to `QueryPlan::optimize`, but it is independent of the
+/// `optimize_plan` setting and remains idempotent when the plan is revisited.
+TEST(GQLInterpreter, OptimizeLowersMatchWhenPlanOptimizationsAreDisabled)
+{
+    auto & context = getMutableContext().context;
+    auto storage = std::make_shared<TestGraphStorage>(context->getCurrentDatabase());
+    auto plan = makeSingleVertexMatchPlan(storage);
+
+    QueryPlanOptimizationSettings optimization_settings(context);
+    optimization_settings.optimize_plan = false;
+    plan.optimize(optimization_settings);
+    plan.optimize(optimization_settings);
+
+    ASSERT_NE(plan.getRootNode(), nullptr);
+    EXPECT_NE(dynamic_cast<const Graph::MatchVertexStep *>(plan.getRootNode()->step.get()), nullptr);
+    EXPECT_NE(debugExplainPlan(plan).find("MatchVertex"), String::npos);
+}
+
+/// `do_optimize = false` skips `QueryPlan::optimize` entirely, so the pipeline
+/// entry point must still lower `MatchStep` before initializing processors.
+TEST(GQLInterpreter, BuildPipelineLowersMatchWhenOptimizationIsSkipped)
+{
+    auto & context = getMutableContext().context;
+    auto storage = std::make_shared<TestGraphStorage>(context->getCurrentDatabase());
+    auto plan = makeSingleVertexMatchPlan(storage);
+
+    QueryPlanOptimizationSettings optimization_settings(context);
+    auto pipeline = plan.buildQueryPipeline(
+        optimization_settings,
+        BuildQueryPipelineSettings{context},
+        /*do_optimize=*/false);
+
+    ASSERT_NE(pipeline, nullptr);
+    ASSERT_NE(plan.getRootNode(), nullptr);
+    EXPECT_NE(dynamic_cast<const Graph::MatchVertexStep *>(plan.getRootNode()->step.get()), nullptr);
 }
 
 /// M1 end-to-end: create a graph, write vertex data, run MATCH (n) RETURN n,
@@ -1615,60 +1771,52 @@ TEST(GQLInterpreter, MatchSingleVertexReturnsRealData)
 {
     auto & mutable_context = getMutableContext().context;
     const auto db_name = mutable_context->getCurrentDatabase();
-
-    /// Get the database object to attach the graph storage.
-    auto database = DatabaseCatalog::instance().getDatabase(db_name);
-    ASSERT_TRUE(database);
-
-    /// Create and register a GraphStorageEngine for the current database.
     auto graph_storage = std::make_shared<GraphStorageEngine>(db_name, mutable_context);
-    database->attachTable(mutable_context, "_graph", graph_storage, "");
+    auto ids = withRegisteredGraphStorage(
+        graph_storage,
+        [&]
+        {
+            graph_storage->createInternalTables();
+            SCOPE_EXIT({ graph_storage->dropInternalTables(); });
 
-    /// Create internal MergeTree tables (vertices, edges_forward, edges_reverse).
-    graph_storage->createInternalTables();
+            auto id_col = ColumnUInt64::create();
+            id_col->insert(10);
+            id_col->insert(20);
+            id_col->insert(30);
 
-    /// Write vertex data: ids 10, 20, 30.
-    {
-        auto id_col = ColumnUInt64::create();
-        id_col->insert(10);
-        id_col->insert(20);
-        id_col->insert(30);
+            auto labels_type = std::make_shared<DataTypeArray>(std::make_shared<DataTypeString>());
+            auto labels_col = labels_type->createColumn();
+            labels_col->insert(Array{"Person"});
+            labels_col->insert(Array{"Person"});
+            labels_col->insert(Array{"Person"});
 
-        auto labels_type = std::make_shared<DataTypeArray>(std::make_shared<DataTypeString>());
-        auto labels_col = labels_type->createColumn();
-        labels_col->insert(Array{"Person"});
-        labels_col->insert(Array{"Person"});
-        labels_col->insert(Array{"Person"});
+            Block input;
+            input.insert({std::move(id_col), std::make_shared<DataTypeUInt64>(), "__ID__"});
+            input.insert({std::move(labels_col), labels_type, "labels"});
+            graph_storage->writeVertex(input);
 
-        Block block;
-        block.insert({std::move(id_col), std::make_shared<DataTypeUInt64>(), "__ID__"});
-        block.insert({std::move(labels_col), labels_type, "labels"});
+            InterpreterGQLQueryAnalyzer interpreter(
+                parseGQL("MATCH (n) RETURN n"),
+                mutable_context,
+                GQLQueryOptions{});
+            auto block_io = interpreter.execute();
 
-        graph_storage->writeVertex(block);
-    }
+            PullingPipelineExecutor executor(block_io.pipeline);
+            Block output;
+            std::vector<UInt64> result;
+            while (executor.pull(output))
+            {
+                if (output.rows() == 0)
+                    continue;
+                const auto & column = assert_cast<const ColumnUInt64 &>(*output.getByName("n").column);
+                for (size_t i = 0; i < output.rows(); ++i)
+                    result.push_back(column.getElement(i));
+            }
+            return result;
+        });
 
-    /// Run MATCH (n) RETURN n through the analyzer path.
-    InterpreterGQLQueryAnalyzer interpreter(
-        parseGQL("MATCH (n) RETURN n"),
-        mutable_context,
-        GQLQueryOptions{});
-    auto block_io = interpreter.execute();
-
-    /// Pull results.
-    PullingPipelineExecutor executor(block_io.pipeline);
-    Block block;
-    std::vector<UInt64> ids;
-    while (executor.pull(block))
-    {
-        if (block.rows() == 0)
-            continue;
-        const auto & col = assert_cast<const ColumnUInt64 &>(*block.getByName("n").column);
-        for (size_t i = 0; i < block.rows(); ++i)
-            ids.push_back(col.getElement(i));
-    }
-
-    /// Verify we got 3 rows back.
-    EXPECT_EQ(ids.size(), 3u);
+    std::sort(ids.begin(), ids.end());
+    EXPECT_EQ(ids, (std::vector<UInt64>{10, 20, 30}));
 }
 
 #endif

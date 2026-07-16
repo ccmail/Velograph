@@ -137,13 +137,12 @@ QueryPipelineBuilderPtr QueryPlan::buildQueryPipeline(const QueryPlanOptimizatio
                                                       const BuildQueryPipelineSettings &build_pipeline_settings, bool do_optimize) {
   checkInitialized();
 
-  /// Expand logical MatchStep nodes into physical graph operators.
-  /// This is lowering, not optimization: it must run unconditionally
-  /// (even when do_optimize=false) so that GQL MATCH plans are always
-  /// in physical form before pipeline initialization.
-  QueryPlanOptimizations::expandMatchSteps(*root, nodes);
-
-  if (do_optimize) optimize(optimization_settings);
+  if (do_optimize)
+    optimize(optimization_settings);
+  else
+    /// `optimizeTreeFirstPass` normally performs this lowering. Call it directly
+    /// when the caller explicitly skips `QueryPlan::optimize`.
+    QueryPlanOptimizations::expandMatchSteps(*root, nodes);
 
   struct Frame {
     Node *node = {};

@@ -88,6 +88,7 @@
 - Drop a table programmatically via the static `InterpreterDropQuery::executeDropQuery(Kind, global_context, current_context, StorageID, sync)`; it takes a `StorageID` directly, so no `ASTDropQuery` construction is needed. `StorageMaterializedView` uses this same path for its inner table.
 - 构造 `SELECT ... WHERE` AST 走 `InterpreterSelectWithUnionQuery` 的做法已废弃（禁止拼 SQL）；图原语经 `read()` + `SelectQueryInfo`（`filter_actions_dag` / `prewhere_info` / 内嵌 `ColumnSet` 的 IN 条件）获得 `KeyCondition` 与 prewhere，见 `05_storage_primitives.md`。
 - GQL 顶层活路径是 `InterpreterGQLQueryAnalyzer` → `buildGQLQueryPlanFromTree` → `planMatchFromTree`；`MatchPlanner.cpp` 的 `resolveGraphStorage` 属 direct planner 遗留路径，顶层查询不经过。
+- `QueryPlan::buildQueryPipeline` 的 `do_optimize = false` 与 `query_plan_enable_optimizations = 0` 不等价：后者仍进入 `QueryPlan::optimize`；逻辑 lowering 必须同时覆盖 pipeline 跳过优化和直接优化/`EXPLAIN` 两类入口，并保持 pass 幂等。
 
 ## Archived（历史参考）
 

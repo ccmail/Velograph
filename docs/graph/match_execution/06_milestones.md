@@ -46,7 +46,8 @@
   - 不支持形态在展开 pass 抛 `NOT_IMPLEMENTED`。
 - 验收：内部表写入数据后，`clickhouse local --dialect=gql` 执行
   `MATCH (n) RETURN n` 返回全部顶点 id；`MATCH (a)-[e]->(b) ...` 抛
-  `NOT_IMPLEMENTED`（不再静默空结果）；gtest 覆盖 graph 解析失败路径。
+  `NOT_IMPLEMENTED`（不再静默空结果）；gtest 覆盖 graph 解析失败路径、精确异常码、
+  pipeline `do_optimize = false` 与直接 `QueryPlan::optimize` 的 lowering 回归。
 - 明确不做：属性列、谓词、多元素模式。
 
 ## M2 属性列 + 谓词归一化（朴素执行）

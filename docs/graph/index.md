@@ -55,7 +55,7 @@ boundary lives in [Graph storage foundation](storage_engine.md).
 | Parser tests | Active | Contract tests live in `src/Parsers/graph/tests/gtest_gql_parser.cpp`. |
 | Interpreter / planner | Active | `GQLSingleQuery` and `GQLCombinedQuery` enter `InterpreterGQLQueryAnalyzer` (QueryTree + passes + `GQLPlanner`); the older `InterpreterGQLQuery` direct planner path is frozen legacy pending removal. |
 | Graph storage | Development foundation | `GraphStorageEngine` manages internal `MergeTree` tables and provides projected full scans. Lookup inputs, schema persistence, and pushdown are not implemented yet. |
-| `MATCH` execution | In design / build | Authoritative plan: [match_execution/](match_execution/00_overview.md) (plan expansion, filter pushdown, storage pushdown, milestones M1-M5). |
+| `MATCH` execution | M1 implemented | The analyzer resolves `<current_database>._graph`, logical `MatchStep` lowers to `MatchVertexStep`, and `MATCH (n) RETURN n` reads real vertex ids. Properties, predicates, and multi-element patterns remain M2-M4. |
 | Graph catalog execution | Design only | `catalog.md` describes the target table-mapping model. |
 
 ## Parser-Only Contract

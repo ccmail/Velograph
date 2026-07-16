@@ -4,6 +4,7 @@
 #include <Processors/QueryPlan/IQueryPlanStep.h>
 #include <Processors/QueryPlan/MergingAggregatedStep.h>
 #include <Processors/QueryPlan/Optimizations/considerEnablingParallelReplicas.h>
+#include <Processors/QueryPlan/Optimizations/expandMatchSteps.h>
 #include <Processors/QueryPlan/Optimizations/Optimizations.h>
 #include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
 #include <Processors/QueryPlan/Optimizations/Utils.h>
@@ -41,6 +42,9 @@ extern const int PROJECTION_NOT_USED;
 namespace QueryPlanOptimizations {
 
 void optimizeTreeFirstPass(const QueryPlanOptimizationSettings &optimization_settings, QueryPlan::Node &root, QueryPlan::Nodes &nodes) {
+  /// Lower logical graph steps before checking whether plan optimizations are enabled.
+  QueryPlanOptimizations::expandMatchSteps(root, nodes);
+
   if (!optimization_settings.optimize_plan) return;
 
   struct Frame {

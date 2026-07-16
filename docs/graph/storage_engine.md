@@ -39,9 +39,10 @@ The graph query layer owns:
 - composing multi-step and variable-length traversals;
 - logical predicates, projections, and plan optimization.
 
-`MatchStep` contains only the compatibility change required by the new storage
-primitive contract. Complete `MATCH` lowering remains graph-query work and is
-developed outside the storage branch.
+`MatchStep` is a query-owned logical step. Before pipeline construction the
+query-plan lowering replaces it with physical steps such as `MatchVertexStep`,
+which call the storage primitives. The storage layer never receives or executes
+a complete `MATCH` pattern.
 
 ## Physical Layout
 
@@ -120,8 +121,8 @@ connected before it can be considered durable.
 - Projection validation fails closed for unknown columns.
 - `supportScan` accurately reports that full scans are available.
 
-This foundation is sufficient to continue the graph query engine toward the
-single-node vertical slice. It is not a claim that general traversal is ready.
+M1 uses this foundation for the single-node `MATCH (n) RETURN n` vertical slice.
+That success is not a claim that general traversal is ready.
 
 ## Required Follow-up
 

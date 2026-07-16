@@ -163,8 +163,8 @@ The future runtime layers are:
 | Interpreter / analyzer | Resolve graph names, validate AST, bind graph variables, and choose planning strategy. | Active: `InterpreterGQLQueryAnalyzer` + GQL QueryTree passes; predicate normalization and property resolution are M2 in [match_execution/](match_execution/00_overview.md). |
 | Graph catalog | Store property graph definitions and map labels / properties to ClickHouse tables and columns. | Design only; the current in-memory registry is not a catalog. |
 | Physical graph storage | Serve projected scans and indexed traversal primitives from ClickHouse tables. | Full-scan foundation implemented; lookup filtering, persistence, and optimization remain. See [Graph storage foundation](storage_engine.md). |
-| Query-plan operators | Represent scans, expand steps, and vertex lookup; participate in QueryPlan optimizations. | M1 builds the single-vertex physical slice; expand and lookup remain M4. |
-| Pipeline processors | Execute expand and lookup operations while reusing ClickHouse processors where possible. | Single-vertex source only; driven expand / lookup processors remain M4. |
+| Query-plan operators | Represent scans, expand steps, and vertex lookup; participate in QueryPlan optimizations. | M1 single-vertex lowering is implemented with logical `MatchStep` and physical `MatchVertexStep`; expand and lookup remain M4. |
+| Pipeline processors | Execute expand and lookup operations while reusing ClickHouse processors where possible. | `MatchVertexStep` initializes the projected vertex source; driven expand / lookup processors remain M4. |
 
 ## Target Execution Model
 
@@ -186,6 +186,8 @@ Current integration points:
 - `ParserGQLQuery` branches in server, client, and local connection parsing.
 - ANTLR4 runtime reuse through the existing ClickHouse contrib infrastructure.
 - Parser contract tests under `src/Parsers/graph/tests`.
+- `InterpreterGQLQueryAnalyzer` registration, GQL QueryTree construction, and
+  the M1 logical-to-physical `MatchStep` lowering path.
 - `GraphStorage` registration in `StorageFactory` and resolution through
   `DatabaseCatalog` as `<graph_database>._graph`.
 - Native reads from internal `MergeTree` tables through the `IGraphStorage`
@@ -193,11 +195,11 @@ Current integration points:
 
 Future integration points:
 
-- Interpreter registration for supported `GQL*` roots.
 - Catalog metadata persistence and introspection.
-- Query-plan step registration or construction for graph scans and expands.
+- M2 property resolution and predicate normalization.
+- M3 storage key-condition / prewhere pushdown and schema recovery.
+- M4 driven expand / lookup processors and direction-complete execution.
 - Runtime settings for graph traversal limits and resource controls.
-- Storage key-condition / prewhere pushdown and schema recovery.
 
 ## Development Rule
 
