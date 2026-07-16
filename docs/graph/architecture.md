@@ -10,9 +10,10 @@ doc_type: 'reference'
 # LeoGraph Architecture
 
 LeoGraph is being developed in layers. The current implemented layers are the
-`GQL` parser / AST contract and an initial interpreter planner path for
-supported query roots. Catalog execution, storage-backed graph scans, and full
-graph-specific query-plan operators are still target architecture.
+`GQL` parser / AST contract, an initial interpreter planner path for supported
+query roots, and a `MergeTree`-backed storage foundation. Catalog execution,
+indexed graph lookups, and full graph-specific query-plan operators are still
+target architecture.
 
 ## Current Implementation: Parser and AST
 
@@ -129,13 +130,38 @@ GQL query text
   -> MergeTree-backed vertex and edge tables
 ```
 
+## Current Storage Foundation
+
+`GraphStorageEngine` is registered as `GraphStorage` and manages four internal
+objects inside the graph database:
+
+```text
+_graph
+  -> vertices          MergeTree by __ID__
+  -> edges_forward     ReplacingMergeTree by __SRC__, type, __RANK__
+  -> edges_reverse     ReplacingMergeTree by __DST__, type, __RANK__
+  -> vertex_degrees    materialized SummingMergeTree view
+```
+
+The storage interface deliberately exposes physical primitives instead of a
+single high-level `MATCH` call. The query engine composes `scan`, `getVertex`,
+`getEdge`, and `getNeighbors`; the storage chooses tables, projections, and
+eventually key conditions.
+
+The current executable storage path is a projected full scan through
+`MergeTreeDataSelectExecutor::read`. Lookup primitives still ignore their key
+or source-id inputs, and schema registration is in-memory only. See
+[Graph storage foundation](storage_engine.md) for the precise support boundary
+and follow-up list.
+
 The future runtime layers are:
 
 | Layer | Target Responsibility | Current State |
 |-------|-----------------------|---------------|
 | Interpreter / analyzer | Resolve graph names, validate AST, bind graph variables, and choose planning strategy. | Not implemented. |
-| Graph catalog | Store property graph definitions and map labels / properties to ClickHouse tables and columns. | Design only. |
-| Query-plan operators | Represent scans, expand steps, multi-hop traversal, and vertex lookup. | Design only. |
+| Graph catalog | Store property graph definitions and map labels / properties to ClickHouse tables and columns. | Design only; the current in-memory registry is not a catalog. |
+| Physical graph storage | Serve projected scans and indexed traversal primitives from ClickHouse tables. | Full-scan foundation implemented; lookup filtering, persistence, and optimization remain. |
+| Query-plan operators | Represent scans, expand steps, multi-hop traversal, and vertex lookup. | Initial `MatchStep` boundary only. |
 | Pipeline processors | Execute expand and lookup operations while reusing ClickHouse processors where possible. | Design only. |
 
 ## Target Execution Model
@@ -162,6 +188,10 @@ Current integration points:
 - `ParserGQLQuery` branches in server, client, and local connection parsing.
 - ANTLR4 runtime reuse through the existing ClickHouse contrib infrastructure.
 - Parser contract tests under `src/Parsers/graph/tests`.
+- `GraphStorage` registration in `StorageFactory` and resolution through
+  `DatabaseCatalog` as `<graph_database>._graph`.
+- Native reads from internal `MergeTree` tables through the `IGraphStorage`
+  physical primitive contract.
 
 Future integration points:
 
@@ -169,11 +199,14 @@ Future integration points:
 - Catalog metadata persistence and introspection.
 - Query-plan step registration or construction for graph scans and expands.
 - Runtime settings for graph traversal limits and resource controls.
+- Storage key-condition / prewhere pushdown and schema recovery.
 
 ## Development Rule
 
-Parser work should continue to be parser-only until the interpreter boundary is
-implemented. Do not add semantic catalog checks, storage behavior, or execution
-workarounds inside the parser. If a valid standard input cannot yet be
-represented by the stable AST contract, keep an explicit `Unsupported GQL ...`
-exception and track the gap with a concrete input and expected AST shape.
+Parser work remains parser-only: do not add semantic catalog checks, storage
+behavior, or execution workarounds inside the parser. Query branches compose
+the `IGraphStorage` primitives, while storage branches own their physical
+implementation and optimization. If a valid standard input cannot yet be
+represented by the stable AST contract, keep an explicit
+`Unsupported GQL ...` exception and track the gap with a concrete input and
+expected AST shape.

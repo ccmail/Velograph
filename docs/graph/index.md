@@ -17,8 +17,10 @@ execution, distributed query infrastructure, settings, and resource tracking.
 The project is currently transitioning from parser-first work into the first
 interpreter / planner path. The main stable contract is still `GQL text ->
 normalized GQL IAST`, and supported query roots now enter an initial
-`InterpreterGQLQuery` / `GQL::GQLPlanBuilder` direct planner path. Graph catalog
-execution and real graph storage integration are still future work.
+`InterpreterGQLQuery` / `GQL::GQLPlanBuilder` direct planner path. A
+`MergeTree`-backed `GraphStorage` development foundation now provides physical
+scan primitives; graph catalog execution, complete traversal correctness, and
+production storage optimization remain future work.
 
 ## Goals
 
@@ -34,7 +36,8 @@ execution and real graph storage integration are still future work.
 ## Non-Goals
 
 - Replace transactional graph databases for OLTP graph workloads.
-- Add a new storage engine in the current parser phase.
+- Treat the current graph storage foundation as production-ready before its
+  schema lifecycle, indexed lookups, and recovery semantics are complete.
 - Infer graph semantics from formatted source text in later interpreter code.
 - Route graph-looking input through ordinary ClickHouse SQL parsing. Production
   `GQL` parsing is selected explicitly through `Dialect::gql`.
@@ -50,7 +53,8 @@ execution and real graph storage integration are still future work.
 | Parser tests | Active | Contract tests live in `src/Parsers/graph/tests/gtest_gql_parser.cpp`. |
 | Interpreter / planner | Active MVP | `GQLSingleQuery` and `GQLCombinedQuery` enter `InterpreterGQLQuery`; reusable helpers under `src/Interpreters/GQL` plan supported source and post-source clauses while unsupported shapes fail closed. |
 | Graph catalog execution | Design only | `catalog.md` describes the target table-mapping model. |
-| Graph operators | Initial boundary | `Graph::MatchStep` and `Graph::MatchSource` define the current source contract; real expand / traversal operators remain design work. |
+| Graph storage | Development foundation | `GraphStorageEngine` manages internal `MergeTree` tables and implements projected full scans. Lookup inputs, schema persistence, and pushdown are not implemented yet. |
+| Graph operators | Initial boundary | `Graph::MatchStep` can target the `IGraphStorage` primitive contract; complete lowering and expand / traversal operators remain graph-query work. |
 
 ## Parser-Only Contract
 
@@ -83,6 +87,7 @@ changes the interpreter contract.
 | [Interpreter readiness checklist](gql_ast_interpreter_todo.md) | Stable AST surface and fail-closed rules for future planner work. |
 | [GQL runtime flow](gql_runtime_flow.md) | Code-reading guide from `executeQuery` through parser, runtime flow, current planner mapping, `MatchStep`, and `MatchSource`. |
 | [Architecture](architecture.md) | Current implementation layers and target runtime architecture. |
+| [Graph storage foundation](storage_engine.md) | Current physical layout, primitive behavior, development boundary, and required correctness / performance follow-up. |
 | [Roadmap](roadmap.md) | Milestones, current parser work, and next implementation slices. |
 | [Graph catalog design](catalog.md) | Future property graph catalog and table mapping model. |
 | [Graph operators design](operators.md) | Future expand and multi-hop execution design. |

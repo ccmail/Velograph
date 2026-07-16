@@ -22,8 +22,8 @@ P0: GQL parser / AST contract
 P1: Interpreter / planner MVP
     status: active and partially implemented
 
-P2: Graph catalog execution
-    status: target design
+P2: Graph storage foundation and catalog execution
+    status: full-scan storage foundation implemented; catalog lifecycle pending
 
 P3: Expand-based graph operators
     status: target design
@@ -114,22 +114,42 @@ calls, session commands, or speculative function mapping.
 Use [GQL AST / Interpreter Readiness](gql_ast_interpreter_todo.md) as the
 handoff checklist before implementing this phase.
 
-## P2: Graph Catalog Execution
+## P2: Graph Storage Foundation and Catalog Execution
 
-**Goal:** Introduce a metadata layer that maps property graph names, labels,
-properties, and edge directions to existing ClickHouse tables and columns.
+**Goal:** Provide a physical graph storage contract and introduce a metadata
+layer that maps property graph names, labels, properties, and edge directions
+to ClickHouse tables and columns.
+
+### Current Foundation
+
+- `GraphStorage` is registered in `StorageFactory`.
+- `GraphStorageEngine` creates vertex, forward-edge, reverse-edge, and degree
+  objects backed by `MergeTree` variants.
+- `IGraphStorage` exposes projected `scan`, `getVertex`, `getEdge`, and
+  `getNeighbors` primitives.
+- Projected full scans work through the native `MergeTree` reader.
+- Lookup primitives are placeholders: they do not yet apply ids, edge keys,
+  predicates, or per-vertex limits.
+- Schema registration is in memory and is not connected to durable graph DDL.
+
+The detailed contract and limitations are documented in
+[Graph storage foundation](storage_engine.md).
 
 Target work:
 
 1. Define persistent graph metadata structures.
 2. Validate graph definitions against `DatabaseCatalog`.
-3. Store and load graph metadata.
+3. Store and load graph metadata and synchronize physical property columns.
 4. Add introspection paths for registered graphs, vertex mappings, and edge
    mappings.
 5. Connect catalog lookup to interpreter/planner.
+6. Implement correct keyed lookup, predicate / limit pushdown, restart recovery,
+   and dual-write reconciliation.
+7. Optimize keys and read paths after query workloads expose representative
+   access patterns.
 
-[Graph Catalog and Table Mapping](catalog.md) describes the target model. It is a
-design document, not a statement of current runtime support.
+[Graph Catalog and Table Mapping](catalog.md) describes the target metadata
+model. It is a design document, not a statement of current catalog support.
 
 ## P3: Expand-Based Graph Operators
 
@@ -145,9 +165,9 @@ Target work:
 4. Define block schemas for graph variables and edge bindings.
 5. Add explainable plan output for supported graph queries.
 
-[Graph Operators](operators.md) describes the target expand execution model. The
-current repository does not yet contain the runtime `GraphScanStep` or
-`GraphExpandStep` implementation.
+[Graph Operators](operators.md) describes the target expand execution model. A
+physical storage `scan` primitive exists, but the current repository does not
+yet contain the runtime `GraphScanStep` or `GraphExpandStep` implementation.
 
 ## P4: Multi-Hop Traversal and Optimization
 
@@ -183,6 +203,7 @@ are stable:
 |-------|----------|---------|
 | Parser unit tests | `src/Parsers/graph/tests/gtest_gql_parser.cpp` | AST root contracts, dense children, clone behavior, and normalized round-trip formatting. |
 | Grammar samples | `tests/graph/parser` and `tests/graph/ldbc` | Parser fixtures and benchmark-inspired inputs. |
+| Storage tests | Future focused tests | Internal-table lifecycle, schema restoration, writes, primitive correctness, direction handling, and pushdown. |
 | Future stateless tests | `tests/queries/0_stateless` | End-to-end parser and interpreter behavior once runtime support exists. |
 | Future integration tests | `tests/integration` | Multi-node catalog and execution behavior once graph runtime exists. |
 
