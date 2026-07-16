@@ -1,29 +1,42 @@
 #pragma once
 
+#include <Core/Block.h>
 #include <Storages/Graph/IGraphStorage.h>
 
 namespace DB
 {
 
-/** Fail-closed placeholder graph storage.
+/** A degenerate graph storage that always reports an empty graph.
   *
-  * Produces no rows for any `MATCH`, and inherits the fail-closed `IStorage::write`.
-  * It exists so the graph source/storage contract is concrete, instantiable, and
-  * testable before a real graph storage engine is implemented.
+  * It is used as the default storage before a real graph is attached to a GQL
+  * query (see `MatchStep`), so that read primitives keep compiling and return a
+  * well-formed empty result instead of failing. Only `scanImpl` is overridden;
+  * the other primitives inherit the fail-closed `NOT_IMPLEMENTED` defaults,
+  * since an empty graph has no vertices/edges to look up.
   */
 class StorageEmptyGraph final : public IGraphStorage
 {
 public:
-    using IGraphStorage::IGraphStorage;
+    StorageEmptyGraph();
 
-    std::string getName() const override { return "EmptyGraph"; }
+    String getName() const override { return "GraphEmpty"; }
 
-    Pipe readGraphMatch(
-        const Graph::MatchSpec & match_spec,
-        const SharedHeader & header,
-        ContextPtr context,
-        size_t max_block_size,
-        size_t num_streams) override;
+protected:
+    /// Always returns an empty header; an empty graph has no columns.
+    const Block & getGraphHeader(GraphElementKind /*kind*/) const override;
+
+    /// Full-scan over an empty graph produces no rows. The base shell backfills
+    /// a `NullSource` matching the projection header, so callers still get a
+    /// structure-correct empty pipe.
+    Pipe scanImpl(
+        const SharedHeader & /*header*/,
+        const IColumn::Filter & /*header_filter*/,
+        GraphElementKind /*kind*/,
+        size_t /*max_block_size*/,
+        size_t /*num_streams*/) override;
+
+private:
+    Block empty_header;
 };
 
 }
