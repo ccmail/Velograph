@@ -1,20 +1,31 @@
 #include <Storages/Graph/StorageEmptyGraph.h>
 
-#include <Processors/Sources/Graph/MatchSource.h>
 #include <QueryPipeline/Pipe.h>
 
 namespace DB
 {
 
-Pipe StorageEmptyGraph::readGraphMatch(
-    const Graph::MatchSpec & match_spec,
-    const SharedHeader & header,
-    ContextPtr /*context*/,
+StorageEmptyGraph::StorageEmptyGraph()
+    : IGraphStorage(StorageID("default", "__graph_empty"))
+{
+}
+
+const Block & StorageEmptyGraph::getGraphHeader(GraphElementKind /*kind*/) const
+{
+    return empty_header;
+}
+
+Pipe StorageEmptyGraph::scanImpl(
+    const SharedHeader & /*header*/,
+    const IColumn::Filter & /*header_filter*/,
+    GraphElementKind /*kind*/,
     size_t /*max_block_size*/,
     size_t /*num_streams*/)
 {
-    /// No graph data is wired up yet: emit zero rows for the requested pattern.
-    return Pipe(std::make_shared<Graph::MatchSource>(header, match_spec));
+    /// An empty graph has nothing to scan. Returning an empty pipe is correct;
+    /// the base `scan` shell turns it into a `NullSource` matching the
+    /// projection header.
+    return {};
 }
 
 }
