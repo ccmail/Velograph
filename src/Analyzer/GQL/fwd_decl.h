@@ -2,7 +2,8 @@
 
 #include <memory>
 
-namespace DB {
+namespace DB
+{
 
 // Forward declarations for all GQL QueryTree nodes
 
@@ -79,4 +80,4 @@ using GQLOrderByNodePtr = std::shared_ptr<GQLOrderByNode>;
 class GQLPageNode;
 using GQLPageNodePtr = std::shared_ptr<GQLPageNode>;
 
-}  // namespace DB
+}

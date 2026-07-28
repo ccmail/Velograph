@@ -4,7 +4,8 @@
 #include <Processors/QueryPlan/Graph/MatchSpec.h>
 #include <Storages/Graph/IGraphStorage_fwd.h>
 
-namespace DB {
+namespace DB
+{
 
 /// Resolve the graph storage registered for the context's current database.
 /// All fail -> throw UNKNOWN_TABLE, never returns null.
@@ -17,6 +18,6 @@ GraphStoragePtr resolveActiveGraphStorage(ContextPtr context);
 ///   2. context current database: if that database has a GraphStorageEngine
 ///      registered as StorageID{db, "_graph"}, use it
 /// All fail → throw UNKNOWN_TABLE, never returns null.
-GraphStoragePtr resolveActiveGraphStorage(const Graph::MatchSpec& spec, ContextPtr context);
+GraphStoragePtr resolveActiveGraphStorage(const Graph::MatchSpec & spec, ContextPtr context);
 
-}  // namespace DB
+}
