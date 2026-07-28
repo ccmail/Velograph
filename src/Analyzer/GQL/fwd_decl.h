@@ -2,8 +2,7 @@
 
 #include <memory>
 
-namespace DB
-{
+namespace DB {
 
 // Forward declarations for all GQL QueryTree nodes
 
@@ -57,6 +56,9 @@ using GQLPropertyMapNodePtr = std::shared_ptr<GQLPropertyMapNode>;
 class GQLPropertyItemNode;
 using GQLPropertyItemNodePtr = std::shared_ptr<GQLPropertyItemNode>;
 
+class GQLPropertyAccessNode;
+using GQLPropertyAccessNodePtr = std::shared_ptr<GQLPropertyAccessNode>;
+
 // Projection and filter nodes
 class GQLKeepNode;
 using GQLKeepNodePtr = std::shared_ptr<GQLKeepNode>;
@@ -77,4 +79,4 @@ using GQLOrderByNodePtr = std::shared_ptr<GQLOrderByNode>;
 class GQLPageNode;
 using GQLPageNodePtr = std::shared_ptr<GQLPageNode>;
 
-}
+}  // namespace DB
