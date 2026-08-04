@@ -300,3 +300,15 @@ else()
         )
     endforeach()
 endif ()
+
+# A real CMake executable target lets IDEs discover and debug the `GQL` review
+# binary directly. It intentionally mirrors the universal `clickhouse` binary's
+# link libraries but skips installation and release packaging.
+clickhouse_add_executable (clickhouse-gql-review main.cpp)
+target_include_directories (clickhouse-gql-review PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+get_target_property (_gql_link_libs clickhouse LINK_LIBRARIES)
+target_link_libraries (clickhouse-gql-review PRIVATE ${_gql_link_libs})
+target_compile_definitions (clickhouse-gql-review PRIVATE
+    CLICKHOUSE_GQL_REVIEW=1
+    CLICKHOUSE_GQL_REVIEW_DATA_PATH="${ClickHouse_SOURCE_DIR}/tmp/gql_review"
+    CLICKHOUSE_GQL_REVIEW_SEED_FILE="${ClickHouse_SOURCE_DIR}/tests/graph/fixtures/match_execution/seed.sql")
