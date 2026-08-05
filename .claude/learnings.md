@@ -92,6 +92,7 @@
 - 本仓库的 GitHub 评论、PR/issue 状态等写操作统一使用本机 `gh`，不要使用 Codex GitHub 连接器；操作前用 `gh api user` 确认活动账号，避免作者身份错位。
 - Cached `ANTLR` parser trees retain raw pointers into their `CommonTokenStream`; when reusing a thread-local parser, keep its token stream alive through AST visitation instead of constructing the stream on the parse helper's stack.
 - In `DEBUG_OR_SANITIZER_BUILD`, constructing `DB::Exception` with `LOGICAL_ERROR` aborts before a catch-based gtest assertion can observe it; use a conditional `EXPECT_DEATH` in debug/sanitizer builds and assert the exception code in release builds.
+- `ClickHouse/ClickHouse#42450` records the same macOS arm64 pre-`main` `unit_tests_dbms` failure in `edata_szind_get_maybe_invalid`, reached when libc++ filesystem static initialization frees through jemalloc; keep jemalloc opt-in on Darwin unless its zone-registration order is proven safe.
 
 ## Archived（历史参考）
 

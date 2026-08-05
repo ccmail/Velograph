@@ -8,7 +8,14 @@ if ((SANITIZE AND NOT SANITIZE STREQUAL "undefined") OR NOT (
     endif ()
     set (ENABLE_JEMALLOC OFF)
 else ()
-    option (ENABLE_JEMALLOC "Enable jemalloc allocator" ${ENABLE_LIBRARIES})
+    # On macOS, process-wide zone replacement can interact with C++ static initialization
+    # so that memory allocated by libc++ is freed through a different allocator.
+    # Keep experimental Darwin support available, but require an explicit opt-in.
+    if (OS_DARWIN)
+        option (ENABLE_JEMALLOC "Enable jemalloc allocator" OFF)
+    else ()
+        option (ENABLE_JEMALLOC "Enable jemalloc allocator" ${ENABLE_LIBRARIES})
+    endif ()
 endif ()
 
 if (NOT ENABLE_JEMALLOC)
