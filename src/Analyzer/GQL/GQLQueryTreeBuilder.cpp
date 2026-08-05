@@ -261,8 +261,8 @@ private:
         }
         match_node->getPathPatternsNode() = std::move(patterns_list);
 
-        /// MATCH-level WHERE / KEEP / YIELD and OPTIONAL operand blocks are not represented in the
-        /// QueryTree builder yet; fail closed instead of silently dropping them.
+        /// Preserve MATCH-level WHERE for predicate normalization. KEEP, YIELD, and
+        /// OPTIONAL operand blocks are unsupported and must fail closed.
         if (match.where)
         {
             const auto * where = match.where->as<GAST::GQLWhereClause>();

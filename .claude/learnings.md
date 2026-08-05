@@ -80,7 +80,7 @@
 - Name current `GQL` direct `QueryPlan` helpers as planner/binder/spec-builder pieces (`GQLPlanner`, `GQLPlanBuilder`, `PostSourceClausePlanner`, `PatternBinder`, `MatchSpecBuilder`) and reserve `QueryPipeline` wording for `QueryPlan::buildQueryPipeline` and processor execution.
 - For future `GQL` analyzer work, treat SQL `QueryNode` as a `SELECT`-shaped sibling under `IQueryTreeNode`, not a reusable generic root; add `GQL*` QueryTree nodes instead of removing `final` or storing `MATCH` in `QueryNode::getJoinTree`.
 - In `GQL` QueryTree design, do not preserve parser-only convenience shapes blindly: model optional operand blocks as block-level nodes and split parser `GQLPageClause` into `GQLOrderByNode` plus `GQLPageNode`.
-- Keep `GQL` QueryTree analysis out of generic SQL `QueryAnalyzer`; use a dedicated `GQLQueryTreePassManager`, and let SQL analyzer fail closed on unknown node types without enumerating `GQL*` nodes.
+- Keep `GQL` QueryTree construction and pass definitions out of generic SQL `QueryAnalyzer`, but register GQL-specific passes in the common `QueryTreePassManager`; let SQL analysis fail closed on unsupported `GQL*` roots rather than duplicating analyzer infrastructure.
 - For future `GQL` development, follow ClickHouse-native architecture and style first; do not introduce intermediate abstractions (including half-baked service bags like `PlanEnvironment`) only to satisfy unit tests. Tests should cover real production boundaries, while unsupported semantics should fail closed.
 - `src/Storages/Graph` is registered as the `clickhouse_storages_graph` target via `add_object_library(clickhouse_storages_graph Storages/Graph)` in `src/CMakeLists.txt`; the `add_headers_and_sources` macro GLOBs `*.h`/`*.cpp` (see `cmake/dbms_glob_sources.cmake`), so new files need no `CMakeLists.txt` edit, only a cmake rerun for `CONFIGURE_DEPENDS` to rescan.
 - `ReplacingMergeTree` takes its version column as the first engine argument (`ReplacingMergeTree(__RANK__)`), per `src/Storages/MergeTree/registerStorageMergeTree.cpp`; build it programmatically as `makeASTFunction("ReplacingMergeTree", makeASTIdentifier("__RANK__"))`, not as a bare no-arg engine.
@@ -89,6 +89,9 @@
 - 构造 `SELECT ... WHERE` AST 走 `InterpreterSelectWithUnionQuery` 的做法已废弃（禁止拼 SQL）；图原语经 `read()` + `SelectQueryInfo`（`filter_actions_dag` / `prewhere_info` / 内嵌 `ColumnSet` 的 IN 条件）获得 `KeyCondition` 与 prewhere，见 `05_storage_primitives.md`。
 - GQL 顶层活路径是 `InterpreterGQLQueryAnalyzer` → `buildGQLQueryPlanFromTree` → `planMatchFromTree`；`MatchPlanner.cpp` 的 `resolveGraphStorage` 属 direct planner 遗留路径，顶层查询不经过。
 - `QueryPlan::buildQueryPipeline` 的 `do_optimize = false` 与 `query_plan_enable_optimizations = 0` 不等价：后者仍进入 `QueryPlan::optimize`；逻辑 lowering 必须同时覆盖 pipeline 跳过优化和直接优化/`EXPLAIN` 两类入口，并保持 pass 幂等。
+- 本仓库的 GitHub 评论、PR/issue 状态等写操作统一使用本机 `gh`，不要使用 Codex GitHub 连接器；操作前用 `gh api user` 确认活动账号，避免作者身份错位。
+- Cached `ANTLR` parser trees retain raw pointers into their `CommonTokenStream`; when reusing a thread-local parser, keep its token stream alive through AST visitation instead of constructing the stream on the parse helper's stack.
+- In `DEBUG_OR_SANITIZER_BUILD`, constructing `DB::Exception` with `LOGICAL_ERROR` aborts before a catch-based gtest assertion can observe it; use a conditional `EXPECT_DEATH` in debug/sanitizer builds and assert the exception code in release builds.
 
 ## Archived（历史参考）
 

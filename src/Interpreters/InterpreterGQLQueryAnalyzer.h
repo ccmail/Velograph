@@ -15,7 +15,7 @@ namespace DB {
  * This is the GQL counterpart of InterpreterSelectQueryAnalyzer:
  *
  * 1. Parser AST -> GQL QueryTree (GQLQueryTreeBuilder)
- * 2. QueryTree analysis passes (GQLQueryTreePassManager), choosing run vs runOnlyResolve
+ * 2. QueryTree analysis passes using the common QueryTreePassManager, choosing run vs runOnlyResolve
  *    from GQLQueryOptions, just like InterpreterSelectQueryAnalyzer
  * 3. QueryTree -> QueryPlan (GQL::Planner)
  * 4. QueryPlan -> QueryPipeline -> execution
@@ -88,6 +88,5 @@ class InterpreterGQLQueryAnalyzer final : public IInterpreter {
    * std::function<std::unique_ptr<QueryPlan>()> query_plan_with_parallel_replicas_builder;
    */
 };
-
 
 }  // namespace DB

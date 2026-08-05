@@ -11,7 +11,7 @@
 InterpreterFactory.cpp:139-140
   GQLSingleQuery / GQLCombinedQuery → "InterpreterGQLQueryAnalyzer"
 InterpreterGQLQueryAnalyzer（src/Interpreters/InterpreterGQLQueryAnalyzer.cpp）
-  → buildGQLQueryTree + GQLQueryTreePassManager（现仅 GQLNameResolutionPass）
+  → buildGQLQueryTree + 通用 QueryTreePassManager（注册 GQLNameResolutionPass、GQLPredicateNormalizationPass）
   → GQLPlanner::buildQueryPlanIfNeeded
   → buildGQLQueryPlanFromTree（GQLPlanner.cpp:631）
   → planLinearQueryFromTree（GQLPlanner.cpp:493）
@@ -78,9 +78,9 @@ public:
 
 ## 4. 谓词归一化 pass（`GQLPredicateNormalizationPass`，M2）
 
-新增 `src/Analyzer/GQL/Passes/GQLPredicateNormalizationPass.{h,cpp}`，注册于
-`GQLQueryTreePassManager::addDefaultPasses`，**位于 `GQLNameResolutionPass` 之后**
-（依赖名字解析产出的 `ColumnNode`）。
+新增 `src/Analyzer/GQL/Passes/GQLPredicateNormalizationPass.{h,cpp}`，通过
+`GQL::addQueryTreePasses` 注册到通用 `QueryTreePassManager`，**位于
+`GQLNameResolutionPass` 之后**（依赖名字解析产出的 `ColumnNode`）。
 
 对每个 `GQLMatchNode`，将四类谓词来源改写为一个合取，写回 `getWhere()`：
 

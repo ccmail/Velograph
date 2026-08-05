@@ -19,10 +19,14 @@ class QueryTreePassManager : public WithContext {
   /// Add query tree pass
   void addPass(QueryTreePassPtr pass);
 
+  /// Add a pass that must also run in resolve-only mode.
+  /// Resolve passes must be registered before all other passes.
+  void addResolvePass(QueryTreePassPtr pass);
+
   /// Run query tree passes on query tree
   void run(QueryTreeNodePtr& query_tree_node);
 
-  /// Run only query tree passes responsible to name resolution.
+  /// Run only the leading passes registered with addResolvePass.
   void runOnlyResolve(QueryTreeNodePtr& query_tree_node);
 
   /** Run query tree passes on query tree up to up_to_pass_index.
@@ -40,6 +44,7 @@ class QueryTreePassManager : public WithContext {
 
  private:
   std::vector<QueryTreePassPtr> passes;
+  size_t resolve_passes_count = 0;
 };
 
 void addQueryTreePasses(QueryTreePassManager& manager, bool only_analyze = false);

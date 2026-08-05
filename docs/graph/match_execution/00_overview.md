@@ -27,7 +27,7 @@ GQL text
   │  ParserGQLQuery（Dialect::gql）
   ▼
 GQL* IAST
-  │  GQLQueryTreeBuilder + GQLQueryTreePassManager（含谓词归一化）
+  │  GQLQueryTreeBuilder + 通用 QueryTreePassManager（注册 GQL passes，含谓词归一化）
   ▼
 GQL QueryTree                                        ← 层1 Analyzer
   │  buildGQLQueryPlanFromTree / planMatchFromTree
@@ -51,7 +51,7 @@ IGraphStorage 遍历原语（scan / getVertex / getEdge / getNeighbors）
 
 | GQL 侧 | SQL 侧对应物 | 复用程度 |
 |---|---|---|
-| `GQLQueryTreePassManager` | `QueryTreePassManager` | 结构模仿 |
+| GQL 专用 passes 注册到通用 `QueryTreePassManager` | `QueryTreePassManager` | **直接复用** |
 | `planMatchFromTree` 产出朴素计划 | `Planner` 产出 `ReadFromMergeTree` + `FilterStep` | 结构模仿 |
 | `expandMatchSteps`（逻辑→物理） | `convertLogicalJoinToPhysical`（`Optimizations.h:195`） | 结构模仿 |
 | `MatchVertexStep` 继承 `SourceStepWithFilterBase` | `ReadFromMergeTree` 同款基类 | **直接复用** |

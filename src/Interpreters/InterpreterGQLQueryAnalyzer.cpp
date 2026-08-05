@@ -1,5 +1,6 @@
 #include <Analyzer/GQL/GQLQueryTreeBuilder.h>
-#include <Analyzer/GQL/Passes/GQLQueryTreePassManager.h>
+#include <Analyzer/GQL/Passes/GQLQueryTreePasses.h>
+#include <Analyzer/QueryTreePassManager.h>
 #include <Common/Exception.h>
 #include <Core/Block.h>
 #include <Core/Settings.h>
@@ -51,8 +52,8 @@ QueryTreeNodePtr buildGQLQueryTreeAndRunPasses(const ASTPtr& query, const GQLQue
 
   auto query_tree = GQL::buildGQLQueryTree(*query, context);
 
-  GQL::GQLQueryTreePassManager pass_manager(context);
-  GQL::GQLQueryTreePassManager::addDefaultPasses(pass_manager);
+  QueryTreePassManager pass_manager(context);
+  GQL::addQueryTreePasses(pass_manager);
 
   /// Skip header-changing optimization passes for views, secondary (shard) queries, and
   /// callers that explicitly opt out of AST optimizations; otherwise run the full pipeline.

@@ -8,6 +8,7 @@
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Storages/Graph/IGraphStorage.h>
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -26,6 +27,71 @@ namespace DB::Graph
 namespace
 {
 
+void addVariableColumn(Block& header, std::vector<String>& names, const String& variable)
+{
+    if (variable.empty() || std::find(names.begin(), names.end(), variable) != names.end())
+        return;
+
+    names.push_back(variable);
+    header.insert({ColumnUInt64::create(), std::make_shared<DataTypeUInt64>(), variable});
+}
+
+void collectPathVariables(const MatchPathSpec& path, std::vector<String>& variables)
+{
+    for (const auto& alternative : path.alternatives)
+        collectPathVariables(alternative, variables);
+
+    const auto add_variable = [&](const String& variable)
+    {
+        if (!variable.empty() && std::find(variables.begin(), variables.end(), variable) == variables.end())
+            variables.push_back(variable);
+    };
+
+    for (size_t i = 0; i < path.nodes.size(); ++i)
+    {
+        add_variable(path.nodes[i].variable);
+        if (i < path.edges.size())
+            add_variable(path.edges[i].variable);
+    }
+}
+
+void addHeaderColumnsForClause(Block& header, std::vector<String>& names, const MatchClauseSpec& clause)
+{
+    std::vector<String> variables;
+    for (const auto& path : clause.paths)
+        collectPathVariables(path, variables);
+
+    if (!clause.yield_variables.empty())
+    {
+        for (const auto& variable : clause.yield_variables)
+        {
+            if (std::find(variables.begin(), variables.end(), variable) != variables.end())
+                addVariableColumn(header, names, variable);
+        }
+        return;
+    }
+
+    for (const auto& variable : variables)
+        addVariableColumn(header, names, variable);
+}
+
+SharedHeader makeLegacyHeader(const MatchSpec& match_spec)
+{
+    Block header;
+    std::vector<String> names;
+
+    if (!match_spec.clauses.empty())
+    {
+        for (const auto& clause : match_spec.clauses)
+            addHeaderColumnsForClause(header, names, clause);
+    }
+    else
+    {
+        addHeaderColumnsForClause(header, names, match_spec);
+    }
+
+    return std::make_shared<const Block>(std::move(header));
+}
 
 ASTPtr cloneOrNull(const ASTPtr & ast)
 {
@@ -181,8 +247,10 @@ SharedHeader MatchStep::makeHeader(
     const GraphStoragePtr & graph_storage,
     const Names & referenced_columns)
 {
-    if (!graph_storage)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot build MatchStep header without graph storage");
+    /// The frozen AST planner does not collect read columns; preserve its
+    /// variable-only header until the M6 cutover removes that planner.
+    if (referenced_columns.empty())
+        return makeLegacyHeader(match_spec);
 
     Block header;
     for (const auto & column_name : referenced_columns)
@@ -193,6 +261,9 @@ SharedHeader MatchStep::makeHeader(
             header.insert({ColumnUInt64::create(), std::make_shared<DataTypeUInt64>(), column_name});
             continue;
         }
+        if (!graph_storage)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot build referenced GQL property column '{}' without graph storage",
+                            column_name);
 
         const auto variable = column_name.substr(0, separator);
         const auto property_name = column_name.substr(separator + 1);

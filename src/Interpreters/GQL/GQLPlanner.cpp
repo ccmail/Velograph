@@ -456,17 +456,15 @@ void planMatchFromTree(
         std::move(match_spec), std::move(graph_storage), std::move(referenced_columns), context));
     scope.replaceWithHeader(*plan.getCurrentHeader(), BindingKind::Source);
 
-    /// MATCH ... WHERE is planned as a post-source FilterStep. The predicate also stays a
-    /// candidate for graph-source pushdown later, but until storage consumes it the filter
-    /// keeps the semantics correct.
+    /// Keep the normalized predicate in a post-source FilterStep. M2 intentionally
+    /// performs no predicate pushdown.
     if (const auto & where = match_node.getWhere())
         planFilter(plan, where);
 }
 
-/// Lower a name-resolved GQL expression node into an ActionsDAG node over the current
-/// plan header. Identifiers are expected to have been rewritten into ColumnNodes by
-/// GQLNameResolutionPass; richer expression kinds (constants, functions) will be added
-/// here as the builder starts producing them.
+/// Lower a name-resolved GQL expression into an ActionsDAG node over the current
+/// plan header. GQLNameResolutionPass must have replaced identifiers and property
+/// accesses with ColumnNodes before planning.
 const ActionsDAG::Node & buildActionsNode(const QueryTreeNodePtr & expression, ActionsDAG & dag)
 {
     if (const auto * column = expression->as<ColumnNode>())

@@ -151,6 +151,15 @@ QueryTreePassManager::QueryTreePassManager(ContextPtr context_) : WithContext(co
 
 void QueryTreePassManager::addPass(QueryTreePassPtr pass) { passes.push_back(std::move(pass)); }
 
+void QueryTreePassManager::addResolvePass(QueryTreePassPtr pass)
+{
+    if (resolve_passes_count != passes.size())
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Resolve passes must be registered before all other query tree passes");
+
+    passes.push_back(std::move(pass));
+    ++resolve_passes_count;
+}
+
 void QueryTreePassManager::run(QueryTreeNodePtr &query_tree_node) {
   auto current_context = getContext();
   size_t passes_size = passes.size();
@@ -163,13 +172,9 @@ void QueryTreePassManager::run(QueryTreeNodePtr &query_tree_node) {
   }
 }
 
-void QueryTreePassManager::runOnlyResolve(QueryTreeNodePtr &query_tree_node) {
-  // Run only query tree passes that doesn't affect output header:
-  // 1. QueryAnalysisPass
-  // 2. GroupingFunctionsResolvePass
-  // 3. AutoFinalOnQueryPass
-  // 4. RemoveUnusedProjectionColumnsPass
-  run(query_tree_node, 4);
+void QueryTreePassManager::runOnlyResolve(QueryTreeNodePtr &query_tree_node)
+{
+    run(query_tree_node, resolve_passes_count);
 }
 
 void QueryTreePassManager::run(QueryTreeNodePtr &query_tree_node, size_t up_to_pass_index) {
@@ -211,71 +216,71 @@ void QueryTreePassManager::dump(WriteBuffer &buffer, size_t up_to_pass_index) {
 }
 
 void addQueryTreePasses(QueryTreePassManager &manager, bool only_analyze) {
-  manager.addPass(std::make_unique<QueryAnalysisPass>(only_analyze));
-  manager.addPass(std::make_unique<GroupingFunctionsResolvePass>());
-  manager.addPass(std::make_unique<AutoFinalOnQueryPass>());
-  /// This pass should be run for the secondary queries
-  /// to ensure that the only required columns are read from VIEWs on the shards.
-  manager.addPass(std::make_unique<RemoveUnusedProjectionColumnsPass>());
+    manager.addResolvePass(std::make_unique<QueryAnalysisPass>(only_analyze));
+    manager.addResolvePass(std::make_unique<GroupingFunctionsResolvePass>());
+    manager.addResolvePass(std::make_unique<AutoFinalOnQueryPass>());
+    /// This pass should be run for the secondary queries
+    /// to ensure that the only required columns are read from VIEWs on the shards.
+    manager.addResolvePass(std::make_unique<RemoveUnusedProjectionColumnsPass>());
 
-  manager.addPass(std::make_unique<ConvertEmptyStringComparisonToFunctionPass>());
-  manager.addPass(std::make_unique<FunctionToSubcolumnsPass>());
+    manager.addPass(std::make_unique<ConvertEmptyStringComparisonToFunctionPass>());
+    manager.addPass(std::make_unique<FunctionToSubcolumnsPass>());
 
-  manager.addPass(std::make_unique<ConvertLogicalExpressionToCNFPass>());
-  manager.addPass(std::make_unique<RegexpFunctionRewritePass>());
+    manager.addPass(std::make_unique<ConvertLogicalExpressionToCNFPass>());
+    manager.addPass(std::make_unique<RegexpFunctionRewritePass>());
 
-  manager.addPass(std::make_unique<RewriteSumFunctionWithSumAndCountPass>());
-  manager.addPass(std::make_unique<CountDistinctPass>());
-  manager.addPass(std::make_unique<UniqToCountPass>());
-  manager.addPass(std::make_unique<RewriteArrayExistsToHasPass>());
-  manager.addPass(std::make_unique<NormalizeCountVariantsPass>());
+    manager.addPass(std::make_unique<RewriteSumFunctionWithSumAndCountPass>());
+    manager.addPass(std::make_unique<CountDistinctPass>());
+    manager.addPass(std::make_unique<UniqToCountPass>());
+    manager.addPass(std::make_unique<RewriteArrayExistsToHasPass>());
+    manager.addPass(std::make_unique<NormalizeCountVariantsPass>());
 
-  manager.addPass(std::make_unique<DistanceTransposedPartialReadsPass>());
+    manager.addPass(std::make_unique<DistanceTransposedPartialReadsPass>());
 
-  /// should before AggregateFunctionsArithmericOperationsPass
-  manager.addPass(std::make_unique<AggregateFunctionOfGroupByKeysPass>());
+    /// should before AggregateFunctionsArithmericOperationsPass
+    manager.addPass(std::make_unique<AggregateFunctionOfGroupByKeysPass>());
 
-  manager.addPass(std::make_unique<AggregateFunctionsArithmericOperationsPass>());
-  manager.addPass(std::make_unique<UniqInjectiveFunctionsEliminationPass>());
+    manager.addPass(std::make_unique<AggregateFunctionsArithmericOperationsPass>());
+    manager.addPass(std::make_unique<UniqInjectiveFunctionsEliminationPass>());
 
-  // Should run before optimization of GROUP BY keys to allow the removal of
-  // toString function.
-  manager.addPass(std::make_unique<IfTransformStringsToEnumPass>());
+    // Should run before optimization of GROUP BY keys to allow the removal of
+    // toString function.
+    manager.addPass(std::make_unique<IfTransformStringsToEnumPass>());
 
-  manager.addPass(std::make_unique<OptimizeGroupByFunctionKeysPass>());
-  manager.addPass(std::make_unique<OptimizeGroupByInjectiveFunctionsPass>());
+    manager.addPass(std::make_unique<OptimizeGroupByFunctionKeysPass>());
+    manager.addPass(std::make_unique<OptimizeGroupByInjectiveFunctionsPass>());
 
-  /// The order here is important as we want to keep collapsing in order
-  manager.addPass(std::make_unique<MultiIfToIfPass>());
-  manager.addPass(std::make_unique<IfConstantConditionPass>());
-  manager.addPass(std::make_unique<IfChainToMultiIfPass>());
-  manager.addPass(std::make_unique<RewriteAggregateFunctionWithIfPass>());
-  manager.addPass(std::make_unique<SumIfToCountIfPass>());
+    /// The order here is important as we want to keep collapsing in order
+    manager.addPass(std::make_unique<MultiIfToIfPass>());
+    manager.addPass(std::make_unique<IfConstantConditionPass>());
+    manager.addPass(std::make_unique<IfChainToMultiIfPass>());
+    manager.addPass(std::make_unique<RewriteAggregateFunctionWithIfPass>());
+    manager.addPass(std::make_unique<SumIfToCountIfPass>());
 
-  manager.addPass(std::make_unique<ComparisonTupleEliminationPass>());
+    manager.addPass(std::make_unique<ComparisonTupleEliminationPass>());
 
-  manager.addPass(std::make_unique<OptimizeRedundantFunctionsInOrderByPass>());
+    manager.addPass(std::make_unique<OptimizeRedundantFunctionsInOrderByPass>());
 
-  manager.addPass(std::make_unique<OrderByTupleEliminationPass>());
-  manager.addPass(std::make_unique<OrderByLimitByDuplicateEliminationPass>());
+    manager.addPass(std::make_unique<OrderByTupleEliminationPass>());
+    manager.addPass(std::make_unique<OrderByLimitByDuplicateEliminationPass>());
 
-  manager.addPass(std::make_unique<FuseFunctionsPass>());
+    manager.addPass(std::make_unique<FuseFunctionsPass>());
 
-  manager.addPass(std::make_unique<ConvertOrLikeChainPass>());
+    manager.addPass(std::make_unique<ConvertOrLikeChainPass>());
 
-  manager.addPass(std::make_unique<LikePerfectAffixRewritePass>());
-  manager.addPass(std::make_unique<LogicalExpressionOptimizerPass>());
+    manager.addPass(std::make_unique<LikePerfectAffixRewritePass>());
+    manager.addPass(std::make_unique<LogicalExpressionOptimizerPass>());
 
-  manager.addPass(std::make_unique<CrossToInnerJoinPass>());
-  manager.addPass(std::make_unique<ShardNumColumnToFunctionPass>());
+    manager.addPass(std::make_unique<CrossToInnerJoinPass>());
+    manager.addPass(std::make_unique<ShardNumColumnToFunctionPass>());
 
-  manager.addPass(std::make_unique<OptimizeDateOrDateTimeConverterWithPreimagePass>());
+    manager.addPass(std::make_unique<OptimizeDateOrDateTimeConverterWithPreimagePass>());
 
-  manager.addPass(std::make_unique<InjectRandomOrderIfNoOrderByPass>());
+    manager.addPass(std::make_unique<InjectRandomOrderIfNoOrderByPass>());
 
-  manager.addPass(std::make_unique<InverseDictionaryLookupPass>());
+    manager.addPass(std::make_unique<InverseDictionaryLookupPass>());
 
-  manager.addPass(std::make_unique<DisableParallelReplicasPass>());
+    manager.addPass(std::make_unique<DisableParallelReplicasPass>());
 }
 
 }  // namespace DB
