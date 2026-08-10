@@ -1,7 +1,10 @@
 #pragma once
 
+#include <Core/Field.h>
 #include <Parsers/ASTWithAlias.h>
 #include <Parsers/graph/AST/Utils.h>
+
+#include <optional>
 
 namespace DB::OPENGQL::AST {
 
@@ -34,6 +37,30 @@ class GQLExpr final : public DB::ASTWithAlias {
     NFKD,
   };
 
+  enum class BinaryOperator : UInt8 {
+    Unknown,
+    Equals,
+    NotEquals,
+    Greater,
+    GreaterOrEquals,
+    Less,
+    LessOrEquals,
+    Plus,
+    Minus,
+    Multiply,
+    Divide,
+    And,
+    Or,
+  };
+
+  enum class SpecialValue : UInt8 {
+    Unknown,
+    True,
+    False,
+    Null,
+    SessionUser,
+  };
+
   enum class Kind : UInt8 {
     Identifier,
     Literal,
@@ -63,6 +90,14 @@ class GQLExpr final : public DB::ASTWithAlias {
 
   static Ptr literal(const String& text) { return Ptr(make_intrusive<GQLExpr>(Kind::Literal, text)); }
 
+  static Ptr literal(const String& text, Field value) {
+    auto expression = make_intrusive<GQLExpr>(Kind::Literal, text);
+    expression->literal_value = std::move(value);
+    return Ptr(expression);
+  }
+
+  static Ptr constant(const String& text);
+
   static Ptr property(Ptr base, const String& property_name) {
     auto expression = make_intrusive<GQLExpr>(Kind::Property, property_name);
     expression->children.push_back(std::move(base));
@@ -75,12 +110,7 @@ class GQLExpr final : public DB::ASTWithAlias {
     return Ptr(expression);
   }
 
-  static Ptr binaryOp(const String& op, Ptr left, Ptr right) {
-    auto expression = make_intrusive<GQLExpr>(Kind::BinaryOp, op);
-    expression->children.push_back(std::move(left));
-    expression->children.push_back(std::move(right));
-    return Ptr(expression);
-  }
+  static Ptr binaryOp(const String& op, Ptr left, Ptr right);
 
   static Ptr functionCall(const String& name, PtrList arguments, SetQuantifier set_quantifier_ = SetQuantifier::None) {
     auto expression = make_intrusive<GQLExpr>(Kind::FunctionCall, name);
@@ -164,7 +194,7 @@ class GQLExpr final : public DB::ASTWithAlias {
 
   static Ptr dynamicParameter(const String& text) { return Ptr(make_intrusive<GQLExpr>(Kind::DynamicParameter, text)); }
 
-  static Ptr specialValue(const String& text) { return Ptr(make_intrusive<GQLExpr>(Kind::SpecialValue, text)); }
+  static Ptr specialValue(const String& text);
 
   static Ptr temporalLiteral(const String& keyword, Ptr string_value) {
     auto expression = make_intrusive<GQLExpr>(Kind::TemporalLiteral, keyword);
@@ -211,6 +241,9 @@ class GQLExpr final : public DB::ASTWithAlias {
 
   Kind kind;
   String text;
+  std::optional<Field> literal_value;
+  BinaryOperator binary_operator = BinaryOperator::Unknown;
+  SpecialValue special_value = SpecialValue::Unknown;
   SetQuantifier set_quantifier = SetQuantifier::None;
   TrimSpec trim_spec = TrimSpec::None;
   TemporalQualifier temporal_qualifier = TemporalQualifier::None;

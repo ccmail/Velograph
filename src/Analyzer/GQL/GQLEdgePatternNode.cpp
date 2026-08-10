@@ -4,6 +4,7 @@
 #include <Common/SipHash.h>
 #include <IO/WriteBuffer.h>
 #include <IO/Operators.h>
+#include <Parsers/graph/GraphAST.h>
 
 namespace DB
 {
@@ -86,8 +87,46 @@ QueryTreeNodePtr GQLEdgePatternNode::cloneImpl() const {
   return result;
 }
 
-ASTPtr GQLEdgePatternNode::toASTImpl(const ConvertToASTOptions &) const {
-  throw Exception(ErrorCodes::UNSUPPORTED_METHOD, "GQLEdgePatternNode::toASTImpl is not implemented yet");
+ASTPtr GQLEdgePatternNode::toASTImpl(const ConvertToASTOptions &options) const {
+  namespace GAST = DB::OPENGQL::AST;
+
+  GAST::EdgeDirection ast_direction;
+  switch (direction) {
+    case Direction::Left:
+      ast_direction = GAST::EdgeDirection::Left;
+      break;
+    case Direction::Right:
+      ast_direction = GAST::EdgeDirection::Right;
+      break;
+    case Direction::Undirected:
+      ast_direction = GAST::EdgeDirection::Undirected;
+      break;
+    case Direction::LeftOrRight:
+      ast_direction = GAST::EdgeDirection::LeftOrRight;
+      break;
+    case Direction::LeftOrUndirected:
+      ast_direction = GAST::EdgeDirection::LeftOrUndirected;
+      break;
+    case Direction::UndirectedOrRight:
+      ast_direction = GAST::EdgeDirection::UndirectedOrRight;
+      break;
+    case Direction::Any:
+      ast_direction = GAST::EdgeDirection::Any;
+      break;
+  }
+
+  auto edge_pattern = make_intrusive<GAST::GQLEdgePattern>(ast_direction);
+  if (!element_variable.empty()) edge_pattern->variable = GAST::GQLExpr::identifier(element_variable);
+  if (getLabelExpression()) edge_pattern->label_expression = getLabelExpression()->toAST(options);
+  if (getPropertyMap()) edge_pattern->properties = getPropertyMap()->toAST(options);
+  if (getWhere()) edge_pattern->where = make_intrusive<GAST::GQLWhereClause>(getWhere()->toAST(options));
+  if (getQuantifier()) throw Exception(ErrorCodes::UNSUPPORTED_METHOD, "GQL edge quantifier cannot be converted to AST yet");
+
+  if (edge_pattern->variable) edge_pattern->children.push_back(edge_pattern->variable);
+  if (edge_pattern->label_expression) edge_pattern->children.push_back(edge_pattern->label_expression);
+  if (edge_pattern->properties) edge_pattern->children.push_back(edge_pattern->properties);
+  if (edge_pattern->where) edge_pattern->children.push_back(edge_pattern->where);
+  return edge_pattern;
 }
 
 }

@@ -4,13 +4,14 @@
 #include <Common/SipHash.h>
 #include <IO/WriteBuffer.h>
 #include <IO/Operators.h>
+#include <Parsers/graph/GraphAST.h>
 
 namespace DB
 {
 
 namespace ErrorCodes
 {
-extern const int UNSUPPORTED_METHOD;
+extern const int LOGICAL_ERROR;
 }
 
 GQLReturnNode::GQLReturnNode() : IQueryTreeNode(children_size) { children[items_child_index] = std::make_shared<ListNode>(); }
@@ -39,8 +40,24 @@ QueryTreeNodePtr GQLReturnNode::cloneImpl() const {
   return result;
 }
 
-ASTPtr GQLReturnNode::toASTImpl(const ConvertToASTOptions &) const {
-  throw Exception(ErrorCodes::UNSUPPORTED_METHOD, "GQLReturnNode::toASTImpl is not implemented yet");
+ASTPtr GQLReturnNode::toASTImpl(const ConvertToASTOptions &options) const {
+  namespace GAST = DB::OPENGQL::AST;
+
+  auto return_clause = make_intrusive<GAST::GQLReturnClause>();
+  return_clause->distinct = distinct;
+
+  for (const auto &item : getItems().getNodes()) {
+    if (!item) throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL RETURN item is null");
+
+    auto expression = item->toAST(options);
+    const String alias = item->getAlias();
+    expression->setAlias({});
+    auto aliased_item = make_intrusive<GAST::GQLAliasedItem>(expression, alias);
+    return_clause->items.push_back(aliased_item);
+    return_clause->children.push_back(aliased_item);
+  }
+
+  return return_clause;
 }
 
 }

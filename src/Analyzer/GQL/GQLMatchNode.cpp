@@ -99,7 +99,7 @@ ASTPtr GQLMatchNode::toASTImpl(const ConvertToASTOptions & options) const {
 
   // Convert WHERE predicate
   if (children[where_child_index]) {
-    match_clause->where = children[where_child_index]->toAST(options);
+    match_clause->where = make_intrusive<GAST::GQLWhereClause>(children[where_child_index]->toAST(options));
     match_clause->children.push_back(match_clause->where);
   }
 

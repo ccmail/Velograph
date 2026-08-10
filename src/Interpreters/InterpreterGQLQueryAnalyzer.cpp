@@ -50,7 +50,7 @@ ContextMutablePtr buildContext(const ContextPtr& context, const GQLQueryOptions&
 QueryTreeNodePtr buildGQLQueryTreeAndRunPasses(const ASTPtr& query, const GQLQueryOptions& gql_query_options, const ContextPtr& context) {
   if (!query) throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL query AST is null");
 
-  auto query_tree = GQL::buildGQLQueryTree(*query, context);
+  auto query_tree = GQL::buildGQLQueryTree(query);
 
   QueryTreePassManager pass_manager(context);
   GQL::addQueryTreePasses(pass_manager);

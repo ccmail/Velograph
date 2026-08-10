@@ -4,12 +4,14 @@
 #include <Common/SipHash.h>
 #include <IO/WriteBuffer.h>
 #include <IO/Operators.h>
+#include <Parsers/graph/GraphAST.h>
 
 namespace DB
 {
 
 namespace ErrorCodes
 {
+extern const int LOGICAL_ERROR;
 extern const int UNSUPPORTED_METHOD;
 }
 
@@ -49,8 +51,23 @@ QueryTreeNodePtr GQLPathPatternNode::cloneImpl() const {
   return result;
 }
 
-ASTPtr GQLPathPatternNode::toASTImpl(const ConvertToASTOptions &) const {
-  throw Exception(ErrorCodes::UNSUPPORTED_METHOD, "GQLPathPatternNode::toASTImpl is not implemented yet");
+ASTPtr GQLPathPatternNode::toASTImpl(const ConvertToASTOptions &options) const {
+  namespace GAST = DB::OPENGQL::AST;
+
+  if (!prefix.empty()) throw Exception(ErrorCodes::UNSUPPORTED_METHOD, "GQL path prefix cannot be converted to AST yet");
+
+  auto path_pattern = make_intrusive<GAST::GQLPathPattern>();
+  if (!path_variable.empty()) {
+    path_pattern->variable = GAST::GQLExpr::identifier(path_variable);
+    path_pattern->children.push_back(path_pattern->variable);
+  }
+
+  if (!getExpression()) throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL path pattern has no expression");
+
+  path_pattern->expression = getExpression()->toAST(options);
+  path_pattern->children.push_back(path_pattern->expression);
+
+  return path_pattern;
 }
 
 }
