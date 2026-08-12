@@ -57,6 +57,9 @@ using GQLPropertyMapNodePtr = std::shared_ptr<GQLPropertyMapNode>;
 class GQLPropertyItemNode;
 using GQLPropertyItemNodePtr = std::shared_ptr<GQLPropertyItemNode>;
 
+class GQLPropertyAccessNode;
+using GQLPropertyAccessNodePtr = std::shared_ptr<GQLPropertyAccessNode>;
+
 // Projection and filter nodes
 class GQLKeepNode;
 using GQLKeepNodePtr = std::shared_ptr<GQLKeepNode>;

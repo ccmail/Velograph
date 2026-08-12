@@ -99,6 +99,10 @@ public:
 
     /// Called once the storage has been opened and is ready to serve reads/writes.
     virtual void onOpen() {}
+
+    /// Full internal vertex or edge header used for analyzer type resolution
+    /// and storage projection.
+    virtual const Block & getGraphHeader(GraphElementKind kind) const = 0;
     /// Called before the storage is closed and its resources released.
     virtual void onClose() {}
 
@@ -219,12 +223,6 @@ protected:
         size_t limit_per_vertex,
         ASTPtr filter_pushdown);
 
-    /// --- Column mask / projection helpers ---
-    //
-    /// The source of truth for the internal table header. Subclasses return the
-    /// full header of their vertex or edge table so the helpers below can build
-    /// a column mask and a projection header from it.
-    virtual const Block & getGraphHeader(GraphElementKind kind) const = 0;
 
     /// Build the projection header and its column mask from a set of requested
     /// column names. `kind` selects the vertex or edge internal header; for an

@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <Analyzer/ConstantNode.h>
+#include <Analyzer/FunctionNode.h>
 #include <Analyzer/GQL/GQLQueryTreeBuilder.h>
 #include <Analyzer/GQL/GQLLinearQueryNode.h>
 #include <Analyzer/GQL/GQLCombinedQueryNode.h>
@@ -11,7 +13,6 @@
 #include <Analyzer/GQL/GQLReturnNode.h>
 #include <Analyzer/IdentifierNode.h>
 #include <Analyzer/ListNode.h>
-#include <Interpreters/Context.h>
 #include <Parsers/graph/ParserGQLQuery.h>
 #include <Parsers/graph/GraphAST.h>
 
@@ -20,12 +21,6 @@ using namespace DB::GQL;
 
 namespace
 {
-
-ContextMutablePtr getContext()
-{
-    static ContextMutablePtr context = Context::createGlobal(nullptr);
-    return context;
-}
 
 ASTPtr parseGQL(const std::string & query)
 {
@@ -42,7 +37,7 @@ TEST(GQLQueryTreeBuilder, SimpleMatch)
     ASSERT_NE(ast, nullptr);
 
     // Build QueryTree
-    auto query_tree = buildGQLQueryTree(*ast, getContext());
+    auto query_tree = buildGQLQueryTree(ast);
     ASSERT_NE(query_tree, nullptr);
 
     // Verify it's a GQLLinearQueryNode
@@ -68,7 +63,7 @@ TEST(GQLQueryTreeBuilder, CombinedQuery)
     ASSERT_NE(ast, nullptr);
 
     // Build QueryTree
-    auto query_tree = buildGQLQueryTree(*ast, getContext());
+    auto query_tree = buildGQLQueryTree(ast);
     ASSERT_NE(query_tree, nullptr);
 
     // Verify it's a GQLCombinedQueryNode
@@ -91,11 +86,11 @@ TEST(GQLQueryTreeBuilder, CombinedQuery)
 TEST(GQLQueryTreeBuilder, RoundTrip)
 {
     // Parse -> QueryTree -> AST -> QueryTree should be idempotent
-    auto original_ast = parseGQL("MATCH (n) RETURN n");
+    auto original_ast = parseGQL("MATCH (a)-[r]->(b) RETURN a.name AS name, 1");
     ASSERT_NE(original_ast, nullptr);
 
     // Build QueryTree
-    auto query_tree = buildGQLQueryTree(*original_ast, getContext());
+    auto query_tree = buildGQLQueryTree(original_ast);
     ASSERT_NE(query_tree, nullptr);
 
     // Convert back to AST
@@ -103,11 +98,11 @@ TEST(GQLQueryTreeBuilder, RoundTrip)
     ASSERT_NE(reconstructed_ast, nullptr);
 
     // Build QueryTree again
-    auto query_tree2 = buildGQLQueryTree(*reconstructed_ast, getContext());
+    auto query_tree2 = buildGQLQueryTree(reconstructed_ast);
     ASSERT_NE(query_tree2, nullptr);
 
     // Both QueryTrees should have the same structure
-    EXPECT_EQ(query_tree->getNodeType(), query_tree2->getNodeType());
+    EXPECT_TRUE(query_tree->isEqual(*query_tree2));
 }
 
 TEST(GQLQueryTreeBuilder, MatchPatternFilled)
@@ -116,7 +111,7 @@ TEST(GQLQueryTreeBuilder, MatchPatternFilled)
     auto ast = parseGQL("MATCH (n) RETURN n");
     ASSERT_NE(ast, nullptr);
 
-    auto query_tree = buildGQLQueryTree(*ast, getContext());
+    auto query_tree = buildGQLQueryTree(ast);
     auto * linear_node = query_tree->as<GQLLinearQueryNode>();
     ASSERT_NE(linear_node, nullptr);
 
@@ -159,7 +154,7 @@ TEST(GQLQueryTreeBuilder, MatchEdgeChain)
     auto ast = parseGQL("MATCH (a)-[r]->(b) RETURN a");
     ASSERT_NE(ast, nullptr);
 
-    auto query_tree = buildGQLQueryTree(*ast, getContext());
+    auto query_tree = buildGQLQueryTree(ast);
     auto * linear_node = query_tree->as<GQLLinearQueryNode>();
     ASSERT_NE(linear_node, nullptr);
 
@@ -189,4 +184,63 @@ TEST(GQLQueryTreeBuilder, MatchEdgeChain)
     EXPECT_EQ(edge->getElementVariable(), "r");
     EXPECT_EQ(b->getElementVariable(), "b");
     EXPECT_EQ(edge->getDirection(), GQLEdgePatternNode::Direction::Right);
+}
+
+TEST(GQLQueryTreeBuilder, ParsedSpecialValues)
+{
+    auto ast = parseGQL("MATCH (n) RETURN TRUE, FALSE, NULL");
+    auto query_tree = buildGQLQueryTree(ast);
+    auto * linear_node = query_tree->as<GQLLinearQueryNode>();
+    ASSERT_NE(linear_node, nullptr);
+
+    const auto & items = linear_node->getSteps().getNodes().back()->as<GQLReturnNode &>().getItems().getNodes();
+    ASSERT_EQ(items.size(), 3u);
+
+    const auto * true_value = items[0]->as<ConstantNode>();
+    const auto * false_value = items[1]->as<ConstantNode>();
+    const auto * null_value = items[2]->as<ConstantNode>();
+    ASSERT_NE(true_value, nullptr);
+    ASSERT_NE(false_value, nullptr);
+    ASSERT_NE(null_value, nullptr);
+    EXPECT_EQ(true_value->getValue().safeGet<UInt64>(), 1u);
+    EXPECT_EQ(false_value->getValue().safeGet<UInt64>(), 0u);
+    EXPECT_TRUE(null_value->getValue().isNull());
+}
+
+TEST(GQLQueryTreeBuilder, FunctionCallAndElementId)
+{
+    auto ast = parseGQL("MATCH (n) RETURN ABS(1), ELEMENT_ID(n)");
+    auto query_tree = buildGQLQueryTree(ast);
+    auto * linear_node = query_tree->as<GQLLinearQueryNode>();
+    ASSERT_NE(linear_node, nullptr);
+
+    const auto & items = linear_node->getSteps().getNodes().back()->as<GQLReturnNode &>().getItems().getNodes();
+    ASSERT_EQ(items.size(), 2u);
+
+    const auto * function = items[0]->as<FunctionNode>();
+    ASSERT_NE(function, nullptr);
+    EXPECT_EQ(function->getFunctionName(), "ABS");
+    ASSERT_EQ(function->getArguments().getNodes().size(), 1u);
+    EXPECT_NE(function->getArguments().getNodes().front()->as<ConstantNode>(), nullptr);
+
+    const auto * element_id = items[1]->as<IdentifierNode>();
+    ASSERT_NE(element_id, nullptr);
+    EXPECT_EQ(element_id->getIdentifier().getFullName(), "n");
+}
+
+TEST(GQLQueryTreeBuilder, TypedBinaryOperator)
+{
+    auto ast = parseGQL("MATCH (n) WHERE 1 = 1 RETURN n");
+    auto query_tree = buildGQLQueryTree(ast);
+    auto * linear_node = query_tree->as<GQLLinearQueryNode>();
+    ASSERT_NE(linear_node, nullptr);
+
+    auto * match = linear_node->getSteps().getNodes().front()->as<GQLMatchNode>();
+    ASSERT_NE(match, nullptr);
+    const auto * equals = match->getWhere()->as<FunctionNode>();
+    ASSERT_NE(equals, nullptr);
+    EXPECT_EQ(equals->getFunctionName(), "equals");
+    ASSERT_EQ(equals->getArguments().getNodes().size(), 2u);
+    EXPECT_NE(equals->getArguments().getNodes()[0]->as<ConstantNode>(), nullptr);
+    EXPECT_NE(equals->getArguments().getNodes()[1]->as<ConstantNode>(), nullptr);
 }

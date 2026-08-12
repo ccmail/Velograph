@@ -136,7 +136,13 @@ void QueryPlan::addStep(QueryPlanStepPtr step) {
 QueryPipelineBuilderPtr QueryPlan::buildQueryPipeline(const QueryPlanOptimizationSettings &optimization_settings,
                                                       const BuildQueryPipelineSettings &build_pipeline_settings, bool do_optimize) {
   checkInitialized();
-  if (do_optimize) optimize(optimization_settings);
+
+  if (do_optimize)
+    optimize(optimization_settings);
+  else
+    /// `optimizeTreeFirstPass` normally performs this lowering. Call it directly
+    /// when the caller explicitly skips `QueryPlan::optimize`.
+    QueryPlanOptimizations::expandMatchSteps(*root, nodes);
 
   struct Frame {
     Node *node = {};

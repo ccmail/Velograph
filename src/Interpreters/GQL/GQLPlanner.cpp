@@ -8,6 +8,7 @@
 #include <Analyzer/GQL/GQLNodePatternNode.h>
 #include <Analyzer/GQL/GQLPathPatternNode.h>
 #include <Analyzer/GQL/GQLPathTermNode.h>
+#include <Analyzer/GQL/GQLPropertyResolution.h>
 #include <Analyzer/GQL/GQLReturnNode.h>
 #include <Analyzer/ColumnNode.h>
 #include <Analyzer/ConstantNode.h>
@@ -20,6 +21,7 @@
 #include <Interpreters/ActionsDAG.h>
 #include <Interpreters/Context.h>
 #include <Interpreters/GQL/GQLPlanBuilder.h>
+#include <Interpreters/GQL/GraphResolver.h>
 #include <Interpreters/GQL/PlanScope.h>
 #include <Parsers/ASTSelectIntersectExceptQuery.h>
 #include <Parsers/graph/GraphAST.h>
@@ -37,6 +39,8 @@
 #include <Common/Exception.h>
 
 #include <optional>
+#include <algorithm>
+#include <unordered_set>
 
 namespace DB
 {
@@ -329,6 +333,10 @@ Graph::MatchPathSpec buildPathSpecFromTree(const GQLPathPatternNode & path)
             const auto * node = elements[i]->as<GQLNodePatternNode>();
             if (!node)
                 throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL path factor must be GQLNodePatternNode");
+            if (node->getLabelExpression() || node->getPropertyMap() || node->getWhere())
+                throw Exception(
+                    ErrorCodes::LOGICAL_ERROR,
+                    "GQL node predicates must be removed by GQLPredicateNormalizationPass before planning");
             Graph::MatchNodeSpec node_spec;
             node_spec.variable = node->getElementVariable();
             spec.nodes.push_back(std::move(node_spec));
@@ -338,6 +346,10 @@ Graph::MatchPathSpec buildPathSpecFromTree(const GQLPathPatternNode & path)
             const auto * edge = elements[i]->as<GQLEdgePatternNode>();
             if (!edge)
                 throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL path factor must be GQLEdgePatternNode");
+            if (edge->getLabelExpression() || edge->getPropertyMap() || edge->getWhere())
+                throw Exception(
+                    ErrorCodes::LOGICAL_ERROR,
+                    "GQL edge predicates must be removed by GQLPredicateNormalizationPass before planning");
             Graph::MatchEdgeSpec edge_spec;
             edge_spec.variable = edge->getElementVariable();
             edge_spec.direction = convertTreeEdgeDirection(edge->getDirection());
@@ -383,27 +395,76 @@ void addEmptySingleRowSource(QueryPlan & plan, PlanScope & scope)
     scope.replaceWithHeader(*plan.getCurrentHeader(), BindingKind::Source);
 }
 
-void planMatchFromTree(QueryPlan & plan, const GQLMatchNode & match_node, ContextPtr context, PlanScope & scope)
+void collectColumnReferences(
+    const QueryTreeNodePtr & node,
+    const IQueryTreeNode * source,
+    std::unordered_set<String> & referenced)
+{
+    if (!node)
+        return;
+
+    if (const auto * column = node->as<ColumnNode>())
+    {
+        const auto column_source = column->getColumnSourceOrNull();
+        if (column_source && column_source.get() == source)
+            referenced.insert(column->getColumnName());
+    }
+
+    for (const auto & child : node->getChildren())
+        collectColumnReferences(child, source, referenced);
+}
+
+Names collectReferencedColumns(const GQLLinearQueryNode & linear, const GQLMatchNode & match)
+{
+    std::unordered_set<String> referenced;
+    for (const auto & step : linear.getSteps().getNodes())
+        collectColumnReferences(step, &match, referenced);
+
+    Names result;
+    for (const auto & binding : collectMatchBindings(match))
+    {
+        result.push_back(binding.name);
+
+        const String prefix = binding.name + ".";
+        Names properties;
+        for (const auto & name : referenced)
+        {
+            if (name.starts_with(prefix))
+                properties.push_back(name);
+        }
+        std::sort(properties.begin(), properties.end());
+        result.insert(result.end(), properties.begin(), properties.end());
+    }
+
+    return result;
+}
+
+void planMatchFromTree(
+    QueryPlan & plan,
+    const GQLMatchNode & match_node,
+    Names referenced_columns,
+    ContextPtr context,
+    PlanScope & scope)
 {
     auto match_spec = buildMatchSpecFromTree(match_node);
 
-    /// A graph storage would be resolved here through DatabaseCatalog from the active graph
-    /// scope; until one is registered, the null storage falls back to an empty source inside
-    /// MatchStep.
-    plan.addStep(std::make_unique<Graph::MatchStep>(std::move(match_spec), nullptr, context));
+    /// Resolve the active graph storage from the context (current database).
+    auto graph_storage = resolveActiveGraphStorage(match_spec, context);
+
+
+    plan.addStep(std::make_unique<Graph::MatchStep>(
+        std::move(match_spec), std::move(graph_storage), std::move(referenced_columns), context));
     scope.replaceWithHeader(*plan.getCurrentHeader(), BindingKind::Source);
 
-    /// MATCH ... WHERE is planned as a post-source FilterStep. The predicate also stays a
-    /// candidate for graph-source pushdown later, but until storage consumes it the filter
-    /// keeps the semantics correct.
+    /// Keep the normalized predicate in a post-source FilterStep. M2 intentionally
+    /// performs no predicate pushdown.
     if (const auto & where = match_node.getWhere())
         planFilter(plan, where);
 }
 
-/// Lower a name-resolved GQL expression node into an ActionsDAG node over the current
-/// plan header. Identifiers are expected to have been rewritten into ColumnNodes by
-/// GQLNameResolutionPass; richer expression kinds (constants, functions) will be added
-/// here as the builder starts producing them.
+/// Lower a name-resolved GQL expression into an ActionsDAG node over the current
+/// plan header. GQLNameResolutionPass must have replaced identifiers and property
+/// accesses with ColumnNodes before planning.
 const ActionsDAG::Node & buildActionsNode(const QueryTreeNodePtr & expression, ActionsDAG & dag)
 {
     if (const auto * column = expression->as<ColumnNode>())
@@ -504,7 +565,7 @@ void planLinearQueryFromTree(QueryPlan & plan, const GQLLinearQueryNode & linear
             if (source_planned)
                 throw Exception(
                     ErrorCodes::NOT_IMPLEMENTED, "GQL analyzer planner does not yet support multiple source clauses");
-            planMatchFromTree(plan, *match, context, scope);
+            planMatchFromTree(plan, *match, collectReferencedColumns(linear, *match), context, scope);
             source_planned = true;
             continue;
         }
@@ -685,6 +746,70 @@ void buildGQLQueryPlan(
     PlanScope & scope)
 {
     buildGQLQueryPlanFromTree(query_plan, query_tree, std::move(context), scope);
+}
+
+Planner::Planner(const QueryTreeNodePtr & query_tree_, const ContextPtr & context_, const GQLQueryOptions & options_)
+    : query_tree(query_tree_)
+    , context(context_)
+    , options(options_)
+{
+}
+
+Planner::Planner(const QueryTreeNodePtr & query_tree_, const ContextPtr & context_, const GQLQueryOptions & options_,
+                 PlanScope & initial_scope_)
+    : query_tree(query_tree_)
+    , context(context_)
+    , options(options_)
+    , plan_scope(initial_scope_)
+{
+}
+
+void Planner::addStorageLimits(const StorageLimitsList & limits)
+{
+    storage_limits.insert(storage_limits.end(), limits.begin(), limits.end());
+}
+
+void Planner::buildPlanForLinearQueryNode()
+{
+    const auto * linear = query_tree->as<GQLLinearQueryNode>();
+    if (!linear)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL query tree is not a linear query");
+
+    planLinearQueryFromTree(query_plan, *linear, context, plan_scope);
+}
+
+void Planner::buildPlanForCombinedQueryNode()
+{
+    const auto * combined = query_tree->as<GQLCombinedQueryNode>();
+    if (!combined)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL query tree is not a combined query");
+
+    planCombinedQueryFromTree(query_plan, *combined, context);
+}
+
+void Planner::buildQueryPlanIfNeeded()
+{
+    if (query_plan_built)
+        return;
+
+    if (!query_tree)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL QueryTree is null");
+
+    switch (query_tree->getNodeType())
+    {
+        case QueryTreeNodeType::GQL_LINEAR_QUERY:
+            buildPlanForLinearQueryNode();
+            break;
+        case QueryTreeNodeType::GQL_COMBINED_QUERY:
+            buildPlanForCombinedQueryNode();
+            break;
+        default:
+            throw Exception(ErrorCodes::NOT_IMPLEMENTED, "GQL planner does not yet support query tree node type: {}",
+                            query_tree->getNodeType());
+    }
+
+    query_plan.addInterpreterContext(context);
+    query_plan_built = true;
 }
 
 }

@@ -14,13 +14,15 @@ ClickHouse. It aims to support standard `GQL` over data stored in ordinary
 ClickHouse tables, while reusing ClickHouse's `MergeTree` storage, vectorized
 execution, distributed query infrastructure, settings, and resource tracking.
 
-The project is currently transitioning from parser-first work into the first
-interpreter / planner path. The main stable contract is still `GQL text ->
-normalized GQL IAST`, and supported query roots now enter an initial
-`InterpreterGQLQuery` / `GQL::GQLPlanBuilder` direct planner path. A
-`MergeTree`-backed `GraphStorage` development foundation now provides physical
-scan primitives; graph catalog execution, complete traversal correctness, and
-production storage optimization remain future work.
+The project is currently transitioning from parser-first work into the
+analyzer / planner / storage integration phase. The main stable contract is
+still `GQL text -> normalized GQL IAST`; supported query roots enter the
+QueryTree-based `InterpreterGQLQueryAnalyzer` path. A `MergeTree`-backed
+`GraphStorage` development foundation provides projected full scans, while
+keyed traversal, schema lifecycle, and production optimization remain. The
+authoritative query design lives in
+[match_execution/](match_execution/00_overview.md); the exact physical-storage
+boundary lives in [Graph storage foundation](storage_engine.md).
 
 ## Goals
 
@@ -51,10 +53,10 @@ production storage optimization remain future work.
 | AST layer | Active | Graph nodes live under `src/Parsers/graph/AST` and inherit from `IAST` or `ASTWithAlias`. |
 | Visitor | Active | `GQLParseTreeVisitor` is split by query, projection, pattern, expression, DML, DDL, and type handling. |
 | Parser tests | Active | Contract tests live in `src/Parsers/graph/tests/gtest_gql_parser.cpp`. |
-| Interpreter / planner | Active MVP | `GQLSingleQuery` and `GQLCombinedQuery` enter `InterpreterGQLQuery`; reusable helpers under `src/Interpreters/GQL` plan supported source and post-source clauses while unsupported shapes fail closed. |
+| Interpreter / planner | Active | `GQLSingleQuery` and `GQLCombinedQuery` enter `InterpreterGQLQueryAnalyzer` (QueryTree + passes + `GQLPlanner`); the older `InterpreterGQLQuery` direct planner path is frozen legacy pending removal. |
+| Graph storage | Development foundation | `GraphStorageEngine` manages internal `MergeTree` tables and provides projected full scans. Lookup inputs, schema persistence, and pushdown are not implemented yet. |
+| `MATCH` execution | M1 implemented | The analyzer resolves `<current_database>._graph`, logical `MatchStep` lowers to `MatchVertexStep`, and `MATCH (n) RETURN n` reads real vertex ids. Properties, predicates, and multi-element patterns remain M2-M4. |
 | Graph catalog execution | Design only | `catalog.md` describes the target table-mapping model. |
-| Graph storage | Development foundation | `GraphStorageEngine` manages internal `MergeTree` tables and implements projected full scans. Lookup inputs, schema persistence, and pushdown are not implemented yet. |
-| Graph operators | Initial boundary | `Graph::MatchStep` can target the `IGraphStorage` primitive contract; complete lowering and expand / traversal operators remain graph-query work. |
 
 ## Parser-Only Contract
 
@@ -83,16 +85,18 @@ changes the interpreter contract.
 
 | Document | Use It For |
 |----------|------------|
+| [MATCH execution design](match_execution/00_overview.md) | Authoritative architecture and milestones for `MATCH` planning, optimization, and storage pushdown. |
 | [GQL parser design](parser.md) | Current parser architecture, AST contract, supported syntax, and dispatch rules. |
-| [Interpreter readiness checklist](gql_ast_interpreter_todo.md) | Stable AST surface and fail-closed rules for future planner work. |
-| [GQL runtime flow](gql_runtime_flow.md) | Code-reading guide from `executeQuery` through parser, runtime flow, current planner mapping, `MatchStep`, and `MatchSource`. |
 | [Architecture](architecture.md) | Current implementation layers and target runtime architecture. |
 | [Graph storage foundation](storage_engine.md) | Current physical layout, primitive behavior, development boundary, and required correctness / performance follow-up. |
-| [Roadmap](roadmap.md) | Milestones, current parser work, and next implementation slices. |
 | [Graph catalog design](catalog.md) | Future property graph catalog and table mapping model. |
-| [Graph operators design](operators.md) | Future expand and multi-hop execution design. |
 | [Grammar notes](../../src/Parsers/graph/grammar/README.md) | Local grammar changes and generation workflow. |
 
+Superseded documents (`gql_runtime_flow.md`, `gql_ast_interpreter_todo.md`,
+`gql_analyzer_refactoring_plan.md`, `roadmap.md`, `operators.md`) were removed
+in favor of `match_execution/`; consult git history if the historical context
+is needed.
+
 Historical parser notes live in [development/parser/README.md](development/parser/README.md).
-They are kept for context only; the parser design document and status roadmap are
-the authoritative development references.
+They are kept for context only; the parser design and `match_execution/`
+documents are the authoritative development references.

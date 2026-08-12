@@ -73,7 +73,7 @@ void planMatchClauseSequence(
     validateExecutableMatch(match_spec);
 
     auto graph_storage = resolveGraphStorage(match_spec, context);
-    plan.addStep(std::make_unique<Graph::MatchStep>(std::move(match_spec), std::move(graph_storage), context));
+    plan.addStep(std::make_unique<Graph::MatchStep>(std::move(match_spec), std::move(graph_storage), Names{}, context));
     scope.replaceWithHeader(*plan.getCurrentHeader(), BindingKind::Source);
 
     for (const auto & match_plan : match_plans)

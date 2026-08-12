@@ -1,35 +1,96 @@
 #include <Processors/QueryPlan/Graph/MatchStep.h>
 
 #include <Columns/ColumnsNumber.h>
-#include <Core/Defines.h>
+#include <Common/Exception.h>
 #include <Core/Names.h>
 #include <DataTypes/DataTypesNumber.h>
 #include <Parsers/IAST.h>
-#include <Processors/Sources/Graph/MatchSource.h>
-#include <QueryPipeline/Pipe.h>
 #include <QueryPipeline/QueryPipelineBuilder.h>
 #include <Storages/Graph/IGraphStorage.h>
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
+
+namespace DB
+{
+namespace ErrorCodes
+{
+extern const int LOGICAL_ERROR;
+}
+}
 
 namespace DB::Graph
 {
 namespace
 {
 
-void addVariableColumn(Block & header, std::vector<String> & names, const String & variable)
+void addVariableColumn(Block& header, std::vector<String>& names, const String& variable)
 {
-    if (variable.empty())
-        return;
-
-    if (std::find(names.begin(), names.end(), variable) != names.end())
+    if (variable.empty() || std::find(names.begin(), names.end(), variable) != names.end())
         return;
 
     names.push_back(variable);
     header.insert({ColumnUInt64::create(), std::make_shared<DataTypeUInt64>(), variable});
+}
+
+void collectPathVariables(const MatchPathSpec& path, std::vector<String>& variables)
+{
+    for (const auto& alternative : path.alternatives)
+        collectPathVariables(alternative, variables);
+
+    const auto add_variable = [&](const String& variable)
+    {
+        if (!variable.empty() && std::find(variables.begin(), variables.end(), variable) == variables.end())
+            variables.push_back(variable);
+    };
+
+    for (size_t i = 0; i < path.nodes.size(); ++i)
+    {
+        add_variable(path.nodes[i].variable);
+        if (i < path.edges.size())
+            add_variable(path.edges[i].variable);
+    }
+}
+
+void addHeaderColumnsForClause(Block& header, std::vector<String>& names, const MatchClauseSpec& clause)
+{
+    std::vector<String> variables;
+    for (const auto& path : clause.paths)
+        collectPathVariables(path, variables);
+
+    if (!clause.yield_variables.empty())
+    {
+        for (const auto& variable : clause.yield_variables)
+        {
+            if (std::find(variables.begin(), variables.end(), variable) != variables.end())
+                addVariableColumn(header, names, variable);
+        }
+        return;
+    }
+
+    for (const auto& variable : variables)
+        addVariableColumn(header, names, variable);
+}
+
+SharedHeader makeLegacyHeader(const MatchSpec& match_spec)
+{
+    Block header;
+    std::vector<String> names;
+
+    if (!match_spec.clauses.empty())
+    {
+        for (const auto& clause : match_spec.clauses)
+            addHeaderColumnsForClause(header, names, clause);
+    }
+    else
+    {
+        addHeaderColumnsForClause(header, names, match_spec);
+    }
+
+    return std::make_shared<const Block>(std::move(header));
 }
 
 ASTPtr cloneOrNull(const ASTPtr & ast)
@@ -50,49 +111,6 @@ ASTs cloneASTs(const ASTs & asts)
     return result;
 }
 
-void addAvailableVariable(std::vector<String> & names, const String & variable)
-{
-    if (variable.empty())
-        return;
-
-    if (std::find(names.begin(), names.end(), variable) != names.end())
-        return;
-
-    names.push_back(variable);
-}
-
-void addPathVariableColumns(Block & header, std::vector<String> & names, const MatchPathSpec & path);
-
-void collectPathVariables(const MatchPathSpec & path, std::vector<String> & result)
-{
-    for (const auto & alternative : path.alternatives)
-        collectPathVariables(alternative, result);
-
-    for (size_t i = 0; i < path.nodes.size(); ++i)
-    {
-        addAvailableVariable(result, path.nodes[i].variable);
-        if (i < path.edges.size())
-            addAvailableVariable(result, path.edges[i].variable);
-    }
-}
-
-void addPathVariableColumns(Block & header, std::vector<String> & names, const MatchPathSpec & path)
-{
-    std::vector<String> variables;
-    collectPathVariables(path, variables);
-    for (const auto & variable : variables)
-        addVariableColumn(header, names, variable);
-}
-
-template <typename MatchLike>
-std::vector<String> collectAvailableVariables(const MatchLike & match_spec)
-{
-    std::vector<String> result;
-    for (const auto & path : match_spec.paths)
-        collectPathVariables(path, result);
-
-    return result;
-}
 
 MatchNodeSpec cloneNodeSpec(const MatchNodeSpec & node)
 {
@@ -172,107 +190,114 @@ MatchSpec cloneMatchSpec(const MatchSpec & match_spec)
     return result;
 }
 
-void addHeaderColumnsForClause(Block & header, std::vector<String> & names, const MatchClauseSpec & clause)
-{
-    if (!clause.yield_variables.empty())
-    {
-        const auto available_names = collectAvailableVariables(clause);
-        for (const auto & variable : clause.yield_variables)
-        {
-            if (std::find(available_names.begin(), available_names.end(), variable) != available_names.end())
-                addVariableColumn(header, names, variable);
-        }
 
-        return;
+std::optional<GraphElementKind> findVariableKind(const MatchPathSpec & path, const String & variable)
+{
+    for (const auto & alternative : path.alternatives)
+    {
+        if (auto kind = findVariableKind(alternative, variable))
+            return kind;
     }
 
-    for (const auto & path : clause.paths)
-        addPathVariableColumns(header, names, path);
+    for (const auto & node : path.nodes)
+    {
+        if (node.variable == variable)
+            return GraphElementKind::Vertex;
+    }
+    for (const auto & edge : path.edges)
+    {
+        if (edge.variable == variable)
+            return GraphElementKind::Edge;
+    }
+    return {};
+}
+
+std::optional<GraphElementKind> findVariableKind(const MatchSpec & spec, const String & variable)
+{
+    for (const auto & clause : spec.clauses)
+    {
+        for (const auto & path : clause.paths)
+        {
+            if (auto kind = findVariableKind(path, variable))
+                return kind;
+        }
+    }
+    for (const auto & path : spec.paths)
+    {
+        if (auto kind = findVariableKind(path, variable))
+            return kind;
+    }
+    return {};
 }
 
 }
 
-MatchStep::MatchStep(MatchSpec match_spec_, GraphStoragePtr graph_storage_, ContextPtr context_)
-    : ISourceStep(makeHeader(match_spec_))
+MatchStep::MatchStep(MatchSpec match_spec_, GraphStoragePtr graph_storage_, Names referenced_columns_, ContextPtr context_)
+    : ISourceStep(makeHeader(match_spec_, graph_storage_, referenced_columns_))
     , match_spec(std::move(match_spec_))
     , graph_storage(std::move(graph_storage_))
+    , referenced_columns(std::move(referenced_columns_))
     , context(std::move(context_))
 {
     setStepDescription("GQL MATCH");
 }
 
-SharedHeader MatchStep::makeHeader(const MatchSpec & match_spec)
+SharedHeader MatchStep::makeHeader(
+    const MatchSpec & match_spec,
+    const GraphStoragePtr & graph_storage,
+    const Names & referenced_columns)
 {
+    /// The frozen AST planner does not collect read columns; preserve its
+    /// variable-only header until the M6 cutover removes that planner.
+    if (referenced_columns.empty())
+        return makeLegacyHeader(match_spec);
+
     Block header;
-    std::vector<String> names;
-
-    if (!match_spec.clauses.empty())
+    for (const auto & column_name : referenced_columns)
     {
-        for (const auto & clause : match_spec.clauses)
-            addHeaderColumnsForClause(header, names, clause);
-
-        return std::make_shared<const Block>(std::move(header));
-    }
-
-    if (!match_spec.yield_variables.empty())
-    {
-        const auto available_names = collectAvailableVariables(match_spec);
-        for (const auto & variable : match_spec.yield_variables)
+        const auto separator = column_name.find('.');
+        if (separator == String::npos)
         {
-            if (std::find(available_names.begin(), available_names.end(), variable) != available_names.end())
-                addVariableColumn(header, names, variable);
+            header.insert({ColumnUInt64::create(), std::make_shared<DataTypeUInt64>(), column_name});
+            continue;
         }
+        if (!graph_storage)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot build referenced GQL property column '{}' without graph storage",
+                            column_name);
 
-        return std::make_shared<const Block>(std::move(header));
+        const auto variable = column_name.substr(0, separator);
+        const auto property_name = column_name.substr(separator + 1);
+        const auto kind = findVariableKind(match_spec, variable);
+        if (!kind)
+            throw Exception(
+                ErrorCodes::LOGICAL_ERROR,
+                "Referenced GQL column '{}' has no matching pattern variable",
+                column_name);
+
+        const auto & storage_header = graph_storage->getGraphHeader(*kind);
+        if (!storage_header.has(property_name))
+            throw Exception(
+                ErrorCodes::LOGICAL_ERROR,
+                "Referenced GQL column '{}' is absent from the graph storage header",
+                column_name);
+
+        header.insert({storage_header.getByName(property_name).type, column_name});
     }
-
-    for (const auto & path : match_spec.paths)
-        addPathVariableColumns(header, names, path);
 
     return std::make_shared<const Block>(std::move(header));
 }
 
 QueryPlanStepPtr MatchStep::clone() const
 {
-    return std::make_unique<MatchStep>(cloneMatchSpec(match_spec), graph_storage, context);
+    return std::make_unique<MatchStep>(cloneMatchSpec(match_spec), graph_storage, referenced_columns, context);
 }
 
-void MatchStep::initializePipeline(QueryPipelineBuilder & pipeline, const BuildQueryPipelineSettings &)
+void MatchStep::initializePipeline(QueryPipelineBuilder & /*pipeline*/, const BuildQueryPipelineSettings &)
 {
-    if (graph_storage)
-    {
-        /// TODO(graph-storage): lower the full `MatchSpec` into a left-deep pipeline
-        /// of `scan` / `getVertex` / `getNeighbors` primitives. Variable-length paths
-        /// (`pathExpand`) are decomposed by the query engine into repeated primitive
-        /// operations, not pushed down as a single storage primitive.
-        ///
-        /// For now, start the plan with a vertex scan of the first node of the first
-        /// path; the remaining nodes and edges will be joined by `getVertex` /
-        /// `getNeighbors` once the execution model is wired up.
-        const auto & paths = match_spec.paths;
-        if (!paths.empty() && !paths.front().nodes.empty())
-        {
-            const auto & first_node = paths.front().nodes.front();
-            (void)first_node;
-            /// Use the Stage-1 (NameSet) overload so the storage builds the column
-            /// mask from the projection column names itself. This keeps `MatchStep`
-            /// agnostic of how the internal table header is laid out.
-            const auto & output_header = getOutputHeader();
-            NameSet projection_columns;
-            projection_columns.reserve(output_header->columns());
-            for (const auto & col : *output_header)
-                projection_columns.insert(col.name);
-
-            pipeline.init(graph_storage->scan(
-                projection_columns,
-                DB::GraphElementKind::Vertex,
-                DEFAULT_BLOCK_SIZE,
-                1));
-            return;
-        }
-    }
-
-    pipeline.init(Pipe(std::make_shared<MatchSource>(getOutputHeader(), match_spec)));
+    throw Exception(
+        ErrorCodes::LOGICAL_ERROR,
+        "MatchStep reached initializePipeline without being expanded by expandMatchSteps; "
+        "this means the pattern shape is not supported or the expansion pass did not run");
 }
 
 }

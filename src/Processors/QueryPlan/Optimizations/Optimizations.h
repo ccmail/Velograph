@@ -12,6 +12,11 @@ namespace QueryPlanOptimizations {
 /// Main functions which optimize QueryPlan tree.
 /// First pass (ideally) apply local idempotent operations on top of Plan.
 void optimizeTreeFirstPass(const QueryPlanOptimizationSettings &optimization_settings, QueryPlan::Node &root, QueryPlan::Nodes &nodes);
+
+/// Expand logical MatchStep nodes into physical graph operator sub-trees.
+/// This is a lowering pass (not an optimization): it runs unconditionally before
+/// the optimization loop so the plan is always in physical form before execution.
+void expandMatchSteps(QueryPlan::Node &root, QueryPlan::Nodes &nodes);
 /// Second pass is used to apply read-in-order and attach a predicate to PK.
 void optimizeTreeSecondPass(const QueryPlanOptimizationSettings &optimization_settings, QueryPlan::Node &root, QueryPlan::Nodes &nodes,
                             QueryPlan &query_plan);

@@ -1457,6 +1457,9 @@ static BlockIO executeQueryImpl(const char *begin, const char *end, ContextMutab
         // We need to force to build it here to check if we need to ignore quota.
         if (auto *interpreter_with_analyzer = dynamic_cast<InterpreterSelectQueryAnalyzer *>(interpreter.get()))
           interpreter_with_analyzer->getQueryPlan();
+        // TODO: Once GQL planner can determine quota/limits dynamically from plan content
+        // (e.g. quota-exempt system graph catalog tables), add an analogous dynamic_cast
+        // for InterpreterGQLQueryAnalyzer to force plan build before ignoreQuota() check.
 
         if (!(interpreter && interpreter->ignoreQuota()) && !quota_checked) {
           quota = context->getQuota();

@@ -278,6 +278,147 @@ When creating a graph, the interpreter validates:
 4. SOURCE/DESTINATION references point to valid vertex tables within the same graph.
 5. Labels are unique within the graph (no two vertex tables share a label).
 
+## Catalog Discovery and Session Roadmap
+
+### Language Boundary
+
+ClickHouse SQL metadata statements are not standard `GQL` statements. In
+particular, the current grammar intentionally has no productions for:
+
+```sql
+SHOW DATABASES
+SHOW TABLES
+DESCRIBE TABLE
+```
+
+The corresponding `GQL` concepts are schemas, property graphs, graph types,
+and the current session schema/property graph. The local grammar already
+contains standard forms such as:
+
+```text
+CREATE SCHEMA
+DROP SCHEMA
+CREATE PROPERTY GRAPH
+DROP PROPERTY GRAPH
+CREATE PROPERTY GRAPH TYPE
+DROP PROPERTY GRAPH TYPE
+SESSION SET SCHEMA
+SESSION SET PROPERTY GRAPH
+```
+
+Parser support is not execution support. `GQLParseTreeVisitorDDL` can produce
+`GQLCatalogStatement`, but `CatalogPlanner::planCatalogClause` currently throws
+`NOT_IMPLEMENTED`. Session commands such as `SESSION SET SCHEMA` and
+`SESSION SET PROPERTY GRAPH` have no dedicated visitor override or AST node
+yet; the grammar accepts them, but the base visitor only traverses their parse
+tree and produces no structured session command.
+
+The implementation must keep two metadata planes separate:
+
+1. The semantic `GQL` plane exposes schemas, property graphs, graph types,
+   vertex types, edge types, and properties.
+2. The ClickHouse physical plane exposes databases, tables, columns, engines,
+   and internal tables such as `vertices`, `edges_forward`, and
+   `edges_reverse`.
+
+Physical tables remain inspectable through ClickHouse SQL and client metadata
+commands. They must not become `GQL` table objects merely to reuse
+`SHOW TABLES`.
+
+### Discovery Syntax
+
+After standard catalog/session execution is available, LeoGraph may add the
+following explicitly documented `GQL` discovery extensions:
+
+```text
+SHOW SCHEMAS
+SHOW PROPERTY GRAPHS [AT <schema reference>]
+DESCRIBE PROPERTY GRAPH <graph reference>
+```
+
+These are LeoGraph extensions, not ISO `GQL` syntax. Their result contracts are:
+
+- `SHOW SCHEMAS` returns only schemas visible to the current user.
+- `SHOW PROPERTY GRAPHS` returns semantic property graphs, never arbitrary
+  ClickHouse tables.
+- `DESCRIBE PROPERTY GRAPH` returns graph identity, vertex types, edge types,
+  endpoint constraints, and exposed properties. Physical source tables may be
+  included only in privileged diagnostic columns.
+- Result columns and ordering are deterministic so interactive output and
+  tests do not depend on hash-map iteration order.
+
+### Delivery Milestones
+
+Catalog work follows the active `MATCH` property/predicate milestone; it does
+not interrupt `MATCH` M2.
+
+#### C0: Lock the Catalog Contract
+
+- Define the temporary mapping `GQL schema -> ClickHouse database`.
+- Define the active property graph lookup through the database's registered
+  `IGraphStorage`; do not infer graph identity from internal table names.
+- Define privilege filtering and snapshot consistency for every catalog read.
+- Add parser contract tests that distinguish standard statements from
+  LeoGraph discovery extensions.
+
+#### C1: Implement Session Selection
+
+- Add explicit AST nodes and execution for `SESSION SET SCHEMA` and
+  `SESSION SET PROPERTY GRAPH`.
+- Store current schema/property graph in `Context`, with clone/copy semantics
+  matching existing session settings.
+- Resolve `CURRENT_SCHEMA` and `CURRENT_PROPERTY_GRAPH` from that state.
+- Make `MATCH` graph resolution consume the same session state instead of
+  introducing a second selection mechanism.
+
+#### C2: Execute and Persist Standard Catalog DDL
+
+- Route `GQLCatalogStatement` roots to a dedicated catalog interpreter rather
+  than representing metadata mutation as a `QueryPlan` data pipeline.
+- Implement create/drop schema, property graph, and property graph type with
+  `IF EXISTS`, `IF NOT EXISTS`, and `OR REPLACE` semantics.
+- Validate referenced tables, columns, endpoints, labels, and properties
+  before publishing metadata.
+- Persist metadata and recover it before accepting queries.
+- Expose the committed snapshot through the system tables defined below.
+
+#### C3: Add Semantic Discovery
+
+- Add dedicated AST nodes for `SHOW SCHEMAS`, `SHOW PROPERTY GRAPHS`, and
+  `DESCRIBE PROPERTY GRAPH`; do not preserve raw source text as an execution
+  contract.
+- Execute discovery against one catalog snapshot and return ordinary
+  ClickHouse blocks.
+- Apply access checks before materializing rows.
+- Cover empty catalogs, qualified names, quoted identifiers, hidden objects,
+  dropped objects, and concurrent catalog replacement.
+
+#### C4: Make Client Metadata Commands Dialect-Independent
+
+- Keep `\l`, `\d`, and future graph-specific shortcuts outside the `GQL`
+  grammar.
+- Resolve those commands through catalog APIs or an explicit ClickHouse SQL
+  parser path instead of rewriting them to SQL text and sending that text to
+  `ParserGQLQuery`.
+- Ensure a `gql` interactive session can inspect metadata without changing its
+  query dialect.
+
+### Completion Criteria
+
+Catalog discovery is complete only when:
+
+1. A session can select a schema and property graph using standard `GQL`.
+2. Catalog DDL survives process restart.
+3. `SHOW SCHEMAS`, `SHOW PROPERTY GRAPHS`, and
+   `DESCRIBE PROPERTY GRAPH` observe the same metadata snapshot used by
+   `MATCH`.
+4. Unauthorized schemas, graphs, labels, and properties are absent rather
+   than returned with redacted names.
+5. Physical ClickHouse metadata remains available for debugging without
+   leaking into the semantic `GQL` object model.
+6. Parser, interpreter, persistence, privilege, and restart tests cover the
+   full contract.
+
 ## System Tables
 
 Three system tables expose graph metadata for introspection:

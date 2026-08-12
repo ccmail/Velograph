@@ -1,5 +1,7 @@
 # `GQL` Refactor Status
 
+> 本文件为历史脉络，interpreter/analyzer 与存储接入现状以 `docs/graph/match_execution/` 为准。
+
 ## Stable Anchor
 
 - Branch: `parser/dev-gql-match-interpreter`
@@ -23,8 +25,8 @@
 
 ### AST layer
 
-- The new AST is intentionally kgraph-shaped but ClickHouse-native.
-- All graph nodes inherit from `IAST` or `ASTWithAlias`, not kgraph `INode`.
+- The new AST is intentionally graph-native but ClickHouse-native.
+- All graph nodes inherit from `IAST` or `ASTWithAlias`, not the earlier `INode`.
 - `IAST::children` must stay dense and non-null; optional graph children should stay in named fields and only be pushed into `children` when present.
 - Query roots should stay stable:
   - linear clause queries return `GQLSingleQuery`;
@@ -75,7 +77,9 @@ The currently supported minimal path is:
 
 ### Interpreter / lowering layer
 
-- Production interpreter dispatch currently maps `GQLSingleQuery` and `GQLCombinedQuery` to `InterpreterGQLQuery`, with root plan construction shared through `RootLowering`.
+> **已废弃**：本节 `*Lowering` 命名（`RootLowering` / `SourceLowering` / `MatchLowering` / `CallLowering` / `SubqueryLowering` / `ClauseLowering` 等）以及 `PlanEnvironment` / `RootLowering` / `MatchSourceFactory` 段落属 direct planner 遗留路径，已废弃。当前顶层活路径为 `InterpreterGQLQueryAnalyzer` → `buildGQLQueryPlanFromTree` → `planMatchFromTree`，见 `docs/graph/match_execution/`。
+
+- Production interpreter dispatch maps `GQLSingleQuery` and `GQLCombinedQuery` to `InterpreterGQLQueryAnalyzer` (`InterpreterFactory.cpp:140`). *(Earlier: `InterpreterGQLQuery` + `RootLowering` — deprecated.)*
 - `InterpreterGQLQuery` and `GQL::PlanBuilder` both accept `GQL::PlanEnvironment`, giving catalog / storage resolution a single planner-wide dependency hook for graph scans and future non-scope services.
 - `InterpreterGQLQuery` delegates query-root lowering to `RootLowering`; single-query clause lowering stays in `GQL::PlanBuilder`; clause-specific work should stay in reusable helpers under `src/Interpreters/GQL/`, not in one monolithic interpreter method.
 - `PlanBuilder` separates source clauses from pipeline clauses. `MATCH` is a source boundary lowered through `SourceLowering` / `MatchLowering`; `SELECT FROM` source lists are classified through a reusable `SourceCompositionLowering` API; inline and named `CALL` entry points are isolated behind position-aware `CallLowering` dispatch; shared subquery validation, binding definitions, and pipeline-only subquery lowering live in `SubqueryLowering`; row-correlated source clauses are routed to `ApplyLowering` with an explicit outer / subquery scope context; DML and catalog clauses fail closed behind module-owned `MutationLowering` / `CatalogLowering` dispatch; `WHERE`, `RETURN`, `SELECT`, `ORDER BY`, `OFFSET`, `LIMIT`, `LET`, `FOR`, `FINISH`, `DISTINCT`, and aggregation are reusable pipeline/source helpers in `ClauseLowering` and `AggregationLowering`.
@@ -150,7 +154,7 @@ Interpreter framework gaps to keep visible:
 4. `SELECT FROM` source-list handling now has a dedicated `SourceCompositionLowering` module with a reusable entry-classification API. It can lower same-graph graph-match source lists into one `GraphMatch` source, while different graph references, mixed source kinds, and true multi-source composition still need real operator semantics.
 5. Expression lowering still covers only the common scalar subset; temporal / duration / value-query / path-constructor / graph-expression execution lowering remains deferred.
 6. `GQLCatalogStatement` and DML clauses have parser AST coverage and dedicated lowering boundaries. They are dispatched from `PlanBuilder` / pipeline-only `SubqueryLowering`, where `PlanEnvironment` is available for future catalog / storage services, but there is still no catalog / mutation execution.
-7. `ClauseSequenceLowering` owns linear `GQLSingleQuery` clause-order dispatch. `PlanBuilder` now holds query-level state, while clause sequencing is a dedicated layer closer to the `kgraph` clause-query interpreter style.
+7. `ClauseSequenceLowering` owns linear `GQLSingleQuery` clause-order dispatch. `PlanBuilder` now holds query-level state, while clause sequencing is a dedicated layer closer to the clause-query interpreter style.
 8. `PipelineLowering` centralizes post-source clause dispatch so `ClauseSequenceLowering`, pipeline-only `SubqueryLowering`, and source-free query lowering share the same catalog / DML / pipeline `CALL` / pure pipeline-clause ordering after a source exists.
 9. Full `ninja` verification is currently blocked by local build-directory regenerate issues under `build/contrib`; use direct TU compilation from `build/compile_commands.json` only as source-level isolation until the build directory is repaired.
 
@@ -158,7 +162,7 @@ Interpreter framework gaps to keep visible:
 
 This section tracks the concrete places that are still incomplete or intentionally deferred in the current `GQL` parser-to-AST work. Use it as implementation direction for follow-up parser branches.
 
-For interpreter / lowering handoff, use `docs/graph/gql_ast_interpreter_todo.md` as the current self-check document. It lists the stable AST surface, known parser gaps, and the fail-closed behavior expected from interpreter work.
+For interpreter / lowering handoff, see `docs/graph/match_execution/` (especially `00_overview.md` and `06_milestones.md`) as the authoritative design documents.
 
 ### Parser-only v1 TODOs
 

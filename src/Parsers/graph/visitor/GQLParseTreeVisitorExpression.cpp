@@ -965,7 +965,7 @@ std::any GQLParseTreeVisitor::visitDynamicParameterSpecification(GQLParser::Dyna
 
 std::any GQLParseTreeVisitor::visitGeneralLiteral(GQLParser::GeneralLiteralContext *context) {
   if (context->BOOLEAN_LITERAL()) return GQLExpr::specialValue(context->BOOLEAN_LITERAL()->getText());
-  if (context->characterStringLiteral()) return GQLExpr::literal(getText(context));
+  if (context->characterStringLiteral()) return GQLExpr::constant(getText(context));
   if (context->BYTE_STRING_LITERAL()) return GQLExpr::literal(getText(context));
   if (context->nullLiteral()) return visit(context->nullLiteral());
   if (context->temporalLiteral()) return visit(context->temporalLiteral());
@@ -1103,7 +1103,7 @@ std::any GQLParseTreeVisitor::visitUnsignedValueSpecification(GQLParser::Unsigne
 
 std::any GQLParseTreeVisitor::visitUnsignedLiteral(GQLParser::UnsignedLiteralContext *context) {
   if (context->generalLiteral()) return visit(context->generalLiteral());
-  return GQLExpr::literal(getText(context));
+  return GQLExpr::constant(getText(context));
 }
 
 }  // namespace OPENGQL

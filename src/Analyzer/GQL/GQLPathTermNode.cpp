@@ -4,13 +4,14 @@
 #include <Common/SipHash.h>
 #include <IO/WriteBuffer.h>
 #include <IO/Operators.h>
+#include <Parsers/graph/GraphAST.h>
 
 namespace DB
 {
 
 namespace ErrorCodes
 {
-extern const int UNSUPPORTED_METHOD;
+extern const int LOGICAL_ERROR;
 }
 
 GQLPathTermNode::GQLPathTermNode() : IQueryTreeNode(children_size) { children[elements_child_index] = std::make_shared<ListNode>(); }
@@ -30,8 +31,17 @@ void GQLPathTermNode::updateTreeHashImpl(HashState &, CompareOptions) const {}
 
 QueryTreeNodePtr GQLPathTermNode::cloneImpl() const { return std::make_shared<GQLPathTermNode>(); }
 
-ASTPtr GQLPathTermNode::toASTImpl(const ConvertToASTOptions &) const {
-  throw Exception(ErrorCodes::UNSUPPORTED_METHOD, "GQLPathTermNode::toASTImpl is not implemented yet");
+ASTPtr GQLPathTermNode::toASTImpl(const ConvertToASTOptions &options) const {
+  namespace GAST = DB::OPENGQL::AST;
+
+  GAST::PtrList factors;
+  factors.reserve(getElements().getNodes().size());
+  for (const auto &element : getElements().getNodes()) {
+    if (!element) throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL path term factor is null");
+    factors.push_back(element->toAST(options));
+  }
+
+  return make_intrusive<GAST::GQLPathTerm>(std::move(factors));
 }
 
 }

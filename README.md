@@ -46,10 +46,10 @@ Start here:
 | [Graph overview](docs/graph/index.md) | Project goals, current status, and document map |
 | [Architecture](docs/graph/architecture.md) | Current parser architecture and target execution architecture |
 | [GQL parser design](docs/graph/parser.md) | ANTLR4 integration, AST contract, and parser pipeline |
-| [Interpreter readiness checklist](docs/graph/gql_ast_interpreter_todo.md) | Stable AST surface and first lowering boundary |
-| [Roadmap](docs/graph/roadmap.md) | Current milestones and next development slices |
+| [MATCH execution overview](docs/graph/match_execution/00_overview.md) | Authoritative MATCH execution architecture and design decisions |
+| [Milestones](docs/graph/match_execution/06_milestones.md) | M0–M5 milestones and acceptance criteria |
 | [Graph catalog design](docs/graph/catalog.md) | Target property graph catalog and table mapping design |
-| [Graph operators design](docs/graph/operators.md) | Target expand-based execution model |
+| [Plan expansion & operators](docs/graph/match_execution/03_plan_expansion.md) | Physical graph operators and expand-based execution model |
 
 ## Repository Layout
 

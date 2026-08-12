@@ -287,6 +287,19 @@ int main(int argc_, char **argv_) {
 
   std::vector<char *> argv(argv_, argv_ + argc_);
 
+#if defined(CLICKHOUSE_GQL_REVIEW)
+  if (argv.size() == 1) {
+    static char local[] = "local";
+    static char data_path[] = "--path=" CLICKHOUSE_GQL_REVIEW_DATA_PATH;
+    static char allow_gql[] = "--allow_experimental_gql_dialect=1";
+    static char multiquery[] = "--multiquery";
+    static char seed_file[] = "--queries-file=" CLICKHOUSE_GQL_REVIEW_SEED_FILE;
+    static char interactive[] = "--interactive";
+    static char disable_suggestion[] = "--disable_suggestion";
+    argv.insert(argv.end(), {local, data_path, allow_gql, multiquery, seed_file, interactive, disable_suggestion});
+  }
+#endif
+
   /// Print a basic help if nothing was matched
   MainFunc main_func = printHelp;
 

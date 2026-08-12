@@ -90,6 +90,8 @@ const char *toString(QueryTreeNodeType type) {
       return "GQL_PROPERTY_MAP";
     case QueryTreeNodeType::GQL_PROPERTY_ITEM:
       return "GQL_PROPERTY_ITEM";
+    case QueryTreeNodeType::GQL_PROPERTY_ACCESS:
+      return "GQL_PROPERTY_ACCESS";
     case QueryTreeNodeType::GQL_KEEP:
       return "GQL_KEEP";
     case QueryTreeNodeType::GQL_YIELD:

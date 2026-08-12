@@ -76,17 +76,33 @@ OPENGQL::GQLLexer *getLexerImpl() {
   return lexer;
 }
 
+CommonTokenStream *getTokenStream(std::string_view query) {
+  auto *lexer = OPENGQL::GQLParserUtils::getLexer(query);
+  static thread_local CommonTokenStream *tokens;
+
+  if (unlikely(!tokens)) {
+    tokens = new CommonTokenStream(lexer);
+    ignoreLSanObject(tokens);
+  } else {
+    tokens->setTokenSource(lexer);
+  }
+
+  return tokens;
+}
+
 template <typename Context>
 Context *parseGQL(std::string_view query, Context *(OPENGQL::GQLParser::*parse_rule)()) {
-  CommonTokenStream tokens(OPENGQL::GQLParserUtils::getLexer(query));
-  OPENGQL::GQLParser *parser = OPENGQL::GQLParserUtils::getParserSLL(&tokens);
+  /// `ANTLR` parse-tree terminal nodes retain raw token pointers. Keep the
+  /// `CommonTokenStream` alive as long as the cached parser's current tree.
+  CommonTokenStream *tokens = getTokenStream(query);
+  OPENGQL::GQLParser *parser = OPENGQL::GQLParserUtils::getParserSLL(tokens);
 
   try {
     return (parser->*parse_rule)();
   } catch (ParseCancellationException &) {
     parser->reset();
-    tokens.seek(0);
-    parser = OPENGQL::GQLParserUtils::getParserLL(&tokens);
+    tokens->seek(0);
+    parser = OPENGQL::GQLParserUtils::getParserLL(tokens);
     return (parser->*parse_rule)();
   } catch (Exception &e) {
     e.addMessage("\nerror when parse gql query: {}.", query);
