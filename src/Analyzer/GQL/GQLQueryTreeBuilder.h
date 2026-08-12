@@ -1,7 +1,6 @@
 #pragma once
 
 #include <Analyzer/IQueryTreeNode.h>
-#include <Interpreters/Context_fwd.h>
 #include <Parsers/IAST_fwd.h>
 
 namespace DB::GQL
@@ -24,9 +23,9 @@ namespace DB::GQL
  *
  * Example:
  *   ASTPtr ast = ParserGQLQuery::parse("MATCH (n) RETURN n");
- *   QueryTreeNodePtr tree = buildGQLQueryTree(*ast, context);
+ *   QueryTreeNodePtr tree = buildGQLQueryTree(ast);
  *   // tree is a GQLLinearQueryNode with GQLMatchNode and GQLReturnNode steps
  */
-QueryTreeNodePtr buildGQLQueryTree(const IAST & query, ContextPtr context);
+QueryTreeNodePtr buildGQLQueryTree(const ASTPtr & query);
 
 }

@@ -159,11 +159,11 @@ std::any GQLParseTreeVisitor::visitSortSpecification(GQLParser::SortSpecificatio
 }
 
 std::any GQLParseTreeVisitor::visitLimitClause(GQLParser::LimitClauseContext *context) {
-  return GQLExpr::literal(getText(context->nonNegativeIntegerSpecification()));
+  return GQLExpr::constant(getText(context->nonNegativeIntegerSpecification()));
 }
 
 std::any GQLParseTreeVisitor::visitOffsetClause(GQLParser::OffsetClauseContext *context) {
-  return GQLExpr::literal(getText(context->nonNegativeIntegerSpecification()));
+  return GQLExpr::constant(getText(context->nonNegativeIntegerSpecification()));
 }
 
 }  // namespace OPENGQL

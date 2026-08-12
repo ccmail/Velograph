@@ -5,6 +5,7 @@
 #include <Common/SipHash.h>
 #include <IO/Operators.h>
 #include <IO/WriteBuffer.h>
+#include <Parsers/graph/GraphAST.h>
 
 namespace DB {
 
@@ -38,8 +39,11 @@ void GQLPropertyAccessNode::updateTreeHashImpl(HashState &state, CompareOptions)
 
 QueryTreeNodePtr GQLPropertyAccessNode::cloneImpl() const { return std::make_shared<GQLPropertyAccessNode>(property_name); }
 
-ASTPtr GQLPropertyAccessNode::toASTImpl(const ConvertToASTOptions &) const {
-  throw Exception(ErrorCodes::UNSUPPORTED_METHOD, "GQLPropertyAccessNode::toASTImpl is not implemented");
+ASTPtr GQLPropertyAccessNode::toASTImpl(const ConvertToASTOptions &options) const {
+  namespace GAST = DB::OPENGQL::AST;
+
+  if (!getBase()) throw Exception(ErrorCodes::UNSUPPORTED_METHOD, "GQL property access has no base expression");
+  return GAST::GQLExpr::property(getBase()->toAST(options), property_name);
 }
 
 }  // namespace DB

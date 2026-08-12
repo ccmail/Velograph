@@ -1,5 +1,7 @@
 #include <Analyzer/GQL/GQLQueryTreeBuilder.h>
 
+#include <Analyzer/ConstantNode.h>
+#include <Analyzer/FunctionNode.h>
 #include <Analyzer/GQL/GQLCombinedQueryNode.h>
 #include <Analyzer/GQL/GQLEdgePatternNode.h>
 #include <Analyzer/GQL/GQLFilterNode.h>
@@ -11,26 +13,24 @@
 #include <Analyzer/GQL/GQLOrderByNode.h>
 #include <Analyzer/GQL/GQLPageNode.h>
 #include <Analyzer/GQL/GQLPathPatternNode.h>
+#include <Analyzer/GQL/GQLPathTermNode.h>
 #include <Analyzer/GQL/GQLPropertyAccessNode.h>
 #include <Analyzer/GQL/GQLPropertyItemNode.h>
 #include <Analyzer/GQL/GQLPropertyMapNode.h>
-#include <Analyzer/GQL/GQLPathTermNode.h>
 #include <Analyzer/GQL/GQLReturnNode.h>
 #include <Analyzer/GQL/GQLYieldNode.h>
-#include <Analyzer/ConstantNode.h>
-#include <Analyzer/FunctionNode.h>
 #include <Analyzer/Identifier.h>
 #include <Analyzer/IdentifierNode.h>
 #include <Analyzer/ListNode.h>
+#include <Common/Exception.h>
 #include <Core/Field.h>
 #include <DataTypes/DataTypeNothing.h>
 #include <DataTypes/DataTypeNullable.h>
-#include <DataTypes/DataTypeString.h>
 #include <DataTypes/DataTypesNumber.h>
-#include <IO/ReadBufferFromString.h>
-#include <IO/ReadHelpers.h>
-#include <Common/Exception.h>
-#include <Common/StringUtils.h>
+#include <Parsers/ASTExpressionList.h>
+#include <Parsers/ASTFunction.h>
+#include <Parsers/ASTIdentifier.h>
+#include <Parsers/ASTLiteral.h>
 #include <Parsers/graph/GraphAST.h>
 
 #include <Poco/String.h>
@@ -54,83 +54,39 @@ namespace
 
 namespace GAST = DB::OPENGQL::AST;
 
-/// Parse a GQL literal token into a constant value, mirroring the literal semantics used by
-/// the existing GQL expression lowering: TRUE/FALSE/NULL, quoted strings, and numeric
-/// literals (float when it contains '.', 'e' or 'E'; signed when it starts with '-';
-/// unsigned otherwise).
-std::pair<Field, DataTypePtr> parseGQLLiteral(const String & raw)
+const char * binaryOperatorToFunctionName(GAST::GQLExpr::BinaryOperator op)
 {
-    String text = raw;
-    trim(text);
-    const String upper = Poco::toUpper(text);
-
-    if (upper == "TRUE")
-        return {Field(UInt64(1)), std::make_shared<DataTypeUInt8>()};
-    if (upper == "FALSE")
-        return {Field(UInt64(0)), std::make_shared<DataTypeUInt8>()};
-    if (upper == "NULL")
-        return {Field(), std::make_shared<DataTypeNullable>(std::make_shared<DataTypeNothing>())};
-
-    if (text.size() >= 2 && ((text.front() == '\'' && text.back() == '\'') || (text.front() == '"' && text.back() == '"')))
+    using BinaryOperator = GAST::GQLExpr::BinaryOperator;
+    switch (op)
     {
-        ReadBufferFromString in(text);
-        String value;
-        if (text.starts_with('"'))
-            readDoubleQuotedStringWithSQLStyle(value, in);
-        else
-            readQuotedStringWithSQLStyle(value, in);
-        assertEOF(in);
-        return {Field(value), std::make_shared<DataTypeString>()};
+        case BinaryOperator::Equals:
+            return "equals";
+        case BinaryOperator::NotEquals:
+            return "notEquals";
+        case BinaryOperator::Greater:
+            return "greater";
+        case BinaryOperator::GreaterOrEquals:
+            return "greaterOrEquals";
+        case BinaryOperator::Less:
+            return "less";
+        case BinaryOperator::LessOrEquals:
+            return "lessOrEquals";
+        case BinaryOperator::Plus:
+            return "plus";
+        case BinaryOperator::Minus:
+            return "minus";
+        case BinaryOperator::Multiply:
+            return "multiply";
+        case BinaryOperator::Divide:
+            return "divide";
+        case BinaryOperator::And:
+            return "and";
+        case BinaryOperator::Or:
+            return "or";
+        case BinaryOperator::Unknown:
+            return nullptr;
     }
 
-    try
-    {
-        if (text.find_first_of(".eE") != String::npos)
-            return {Field(parseFromString<Float64>(text)), std::make_shared<DataTypeFloat64>()};
-        if (text.starts_with('-'))
-            return {Field(parseFromString<Int64>(text)), std::make_shared<DataTypeInt64>()};
-        return {Field(parseFromString<UInt64>(text)), std::make_shared<DataTypeUInt64>()};
-    }
-    catch (...)
-    {
-        throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Unsupported GQL literal in QueryTree builder: {}", raw);
-    }
-}
-
-String normalizedOperator(String op)
-{
-    trim(op);
-    return Poco::toUpper(op);
-}
-
-/// Map a GQL binary operator token to a ClickHouse scalar function name, matching the
-/// operator set understood by the existing GQL expression lowering.
-const char * binaryOperatorToFunctionName(const String & op)
-{
-    if (op == "=")
-        return "equals";
-    if (op == "<>" || op == "!=")
-        return "notEquals";
-    if (op == ">")
-        return "greater";
-    if (op == ">=")
-        return "greaterOrEquals";
-    if (op == "<")
-        return "less";
-    if (op == "<=")
-        return "lessOrEquals";
-    if (op == "+")
-        return "plus";
-    if (op == "-")
-        return "minus";
-    if (op == "*")
-        return "multiply";
-    if (op == "/")
-        return "divide";
-    if (op == "AND")
-        return "and";
-    if (op == "OR")
-        return "or";
     return nullptr;
 }
 
@@ -141,25 +97,22 @@ QueryTreeNodePtr makeFunctionNode(const String & function_name, QueryTreeNodes a
     return function;
 }
 
-/** Internal implementation class for building GQL QueryTree.
- *
- * This class traverses the GQL Parser AST and constructs corresponding
- * QueryTree nodes. It maintains context during the traversal.
- */
+/** Internal implementation class for building GQL QueryTree. */
 class GQLQueryTreeBuilderImpl
 {
 public:
-    explicit GQLQueryTreeBuilderImpl(ContextPtr context_) : context(std::move(context_)) { }
-
     QueryTreeNodePtr build(const IAST & query)
     {
+        QueryTreeNodePtr result;
         if (const auto * single = query.as<GAST::GQLSingleQuery>())
-            return buildLinearQuery(*single);
+            result = buildLinearQuery(*single);
+        else if (const auto * combined = query.as<GAST::GQLCombinedQuery>())
+            result = buildCombinedQuery(*combined);
+        else
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Unsupported GQL query root: {}", query.getID(' '));
 
-        if (const auto * combined = query.as<GAST::GQLCombinedQuery>())
-            return buildCombinedQuery(*combined);
-
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "Unsupported GQL query root: {}", query.getID(' '));
+        result->setOriginalAST(query.clone());
+        return result;
     }
 
 private:
@@ -172,7 +125,10 @@ private:
         for (const auto & clause : query.clauses)
         {
             if (auto step = buildClause(clause))
+            {
+                step->setOriginalAST(clause);
                 steps_list->getNodes().push_back(step);
+            }
         }
 
         linear_node->getStepsNode() = std::move(steps_list);
@@ -492,38 +448,129 @@ private:
 
     QueryTreeNodePtr buildExpression(const IAST & expr)
     {
+        QueryTreeNodePtr result;
         if (const auto * gql_expr = expr.as<GAST::GQLExpr>())
         {
-            if (gql_expr->kind == GAST::GQLExpr::Kind::Identifier)
-                return std::make_shared<IdentifierNode>(Identifier(gql_expr->text));
-
-            if (gql_expr->kind == GAST::GQLExpr::Kind::Literal)
+            using Kind = GAST::GQLExpr::Kind;
+            switch (gql_expr->kind)
             {
-                auto [value, type] = parseGQLLiteral(gql_expr->text);
-                return std::make_shared<ConstantNode>(std::move(value), std::move(type));
-            }
+                case Kind::Identifier:
+                    result = std::make_shared<IdentifierNode>(Identifier(gql_expr->text));
+                    break;
+                case Kind::Literal:
+                    if (!gql_expr->literal_value)
+                        throw Exception(
+                            ErrorCodes::NOT_IMPLEMENTED,
+                            "GQL literal '{}' has no typed value in QueryTree builder",
+                            gql_expr->text);
+                    result = std::make_shared<ConstantNode>(*gql_expr->literal_value);
+                    break;
+                case Kind::SpecialValue:
+                    result = buildSpecialValue(*gql_expr);
+                    break;
+                case Kind::BinaryOp:
+                    result = buildBinaryOp(*gql_expr);
+                    break;
+                case Kind::FunctionCall:
+                    result = buildFunctionCall(*gql_expr);
+                    break;
+                case Kind::Property:
+                    if (gql_expr->children.size() != 1 || !gql_expr->children.front())
+                        throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL property access must have one base expression");
 
-            if (gql_expr->kind == GAST::GQLExpr::Kind::BinaryOp)
-                return buildBinaryOp(*gql_expr);
-
-            if (gql_expr->kind == GAST::GQLExpr::Kind::Property)
-            {
-                if (gql_expr->children.size() != 1 || !gql_expr->children.front())
-                    throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL property access must have one base expression");
-
-                auto property = std::make_shared<GQLPropertyAccessNode>(gql_expr->text);
-                property->getBase() = buildExpression(*gql_expr->children.front());
-                return property;
+                    result = std::make_shared<GQLPropertyAccessNode>(gql_expr->text);
+                    result->as<GQLPropertyAccessNode &>().getBase() = buildExpression(*gql_expr->children.front());
+                    break;
+                default:
+                    break;
             }
         }
+        else if (const auto * identifier = expr.as<ASTIdentifier>())
+        {
+            result = std::make_shared<IdentifierNode>(Identifier(identifier->name_parts));
+        }
+        else if (const auto * literal = expr.as<ASTLiteral>())
+        {
+            result = std::make_shared<ConstantNode>(literal->value);
+        }
+        else if (const auto * function = expr.as<ASTFunction>())
+        {
+            auto function_node = std::make_shared<FunctionNode>(function->name);
+            if (function->parameters)
+                throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Parameterized functions are not supported in GQL QueryTree builder");
 
-        throw Exception(
-            ErrorCodes::NOT_IMPLEMENTED, "GQL expression {} is not yet supported in QueryTree builder", expr.getID(' '));
+            if (function->arguments)
+            {
+                for (const auto & argument : function->arguments->children)
+                    function_node->getArguments().getNodes().push_back(buildExpression(*argument));
+            }
+
+            result = std::move(function_node);
+        }
+
+        if (!result)
+            throw Exception(
+                ErrorCodes::NOT_IMPLEMENTED, "GQL expression {} is not yet supported in QueryTree builder", expr.getID(' '));
+
+        result->setAlias(expr.tryGetAlias());
+        result->setOriginalAST(expr.clone());
+        return result;
+    }
+
+    QueryTreeNodePtr buildSpecialValue(const GAST::GQLExpr & expr)
+    {
+        using SpecialValue = GAST::GQLExpr::SpecialValue;
+        switch (expr.special_value)
+        {
+            case SpecialValue::True:
+                return std::make_shared<ConstantNode>(Field(UInt64(1)), std::make_shared<DataTypeUInt8>());
+            case SpecialValue::False:
+                return std::make_shared<ConstantNode>(Field(UInt64(0)), std::make_shared<DataTypeUInt8>());
+            case SpecialValue::Null:
+                return std::make_shared<ConstantNode>(
+                    Field(), std::make_shared<DataTypeNullable>(std::make_shared<DataTypeNothing>()));
+            case SpecialValue::SessionUser:
+                throw Exception(ErrorCodes::NOT_IMPLEMENTED, "GQL SESSION_USER is not yet supported in QueryTree builder");
+            case SpecialValue::Unknown:
+                throw Exception(
+                    ErrorCodes::NOT_IMPLEMENTED,
+                    "GQL special value '{}' is not supported in QueryTree builder",
+                    expr.text);
+        }
+
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Unknown GQL special value kind");
+    }
+
+    QueryTreeNodePtr buildFunctionCall(const GAST::GQLExpr & expr)
+    {
+        if (expr.set_quantifier != GAST::GQLExpr::SetQuantifier::None)
+            throw Exception(
+                ErrorCodes::NOT_IMPLEMENTED,
+                "GQL function '{}' with a set quantifier is not yet supported in QueryTree builder",
+                expr.text);
+
+        QueryTreeNodes arguments;
+        arguments.reserve(expr.children.size());
+        for (const auto & argument : expr.children)
+        {
+            if (!argument)
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL function '{}' has a null argument", expr.text);
+            arguments.push_back(buildExpression(*argument));
+        }
+
+        if (Poco::icompare(expr.text, "ELEMENT_ID") == 0)
+        {
+            if (arguments.size() != 1)
+                throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL ELEMENT_ID must have exactly one argument");
+            return std::move(arguments.front());
+        }
+
+        return makeFunctionNode(expr.text, std::move(arguments));
     }
 
     QueryTreeNodePtr buildBinaryOp(const GAST::GQLExpr & expr)
     {
-        const auto * function_name = binaryOperatorToFunctionName(normalizedOperator(expr.text));
+        const auto * function_name = binaryOperatorToFunctionName(expr.binary_operator);
         if (!function_name)
             throw Exception(
                 ErrorCodes::NOT_IMPLEMENTED, "GQL binary operator '{}' is not yet supported in QueryTree builder", expr.text);
@@ -616,15 +663,17 @@ private:
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Unknown GQL combined query operator");
     }
 
-    ContextPtr context;
 };
 
 } // anonymous namespace
 
-QueryTreeNodePtr buildGQLQueryTree(const IAST & query, ContextPtr context)
+QueryTreeNodePtr buildGQLQueryTree(const ASTPtr & query)
 {
-    GQLQueryTreeBuilderImpl builder(std::move(context));
-    return builder.build(query);
+    if (!query)
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "GQL query AST is null");
+
+    GQLQueryTreeBuilderImpl builder;
+    return builder.build(*query);
 }
 
 } // namespace GQL
